@@ -17,7 +17,7 @@
 
 <br />
 
-<img src="docs/demo.gif" width="100%" alt="L'open space de Duck Office : des canards travaillent à leurs bureaux, un canard attend sur son bureau, des œufs éclosent sur la table de réunion" />
+<img src="docs/demo.gif" width="100%" alt="L'open space de Duck Office : des canards travaillent à leurs bureaux, un canard attend sur son bureau, des œufs éclosent sur la table de réunion, un livreur apporte une pizza" />
 
 </div>
 
@@ -86,7 +86,15 @@ De temps en temps, toutes les 3 à 8 minutes, il se passe quelque chose. Il n'ar
   </tr>
   <tr>
     <td align="center"><sub>La nuit, et la fiche d'un canard façon vieux RPG</sub></td>
-    <td align="center"><sub>Une cane briefe ses canetons à la table de réunion</sub></td>
+    <td align="center"><sub>Une cane briefe ses canetons à la table de réunion, la pizza arrive</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/halloween.png" alt="L'open space décoré pour Halloween, la nuit" /></td>
+    <td width="50%"><img src="docs/screenshots/noel.png" alt="L'open space décoré pour Noël, sous la neige" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Halloween : citrouilles, chauves-souris et lampes allumées</sub></td>
+    <td align="center"><sub>Noël : sapin, guirlandes et neige derrière les vitres</sub></td>
   </tr>
 </table>
 
