@@ -65,7 +65,7 @@ La nuit, un halo éclaire les canards qui t'attendent, pour que le « ! » et le
 
 ### La vie du bureau
 
-De temps en temps, toutes les 3 à 8 minutes, il se passe quelque chose. Il n'arrive qu'un seul événement à la fois, et jamais pendant qu'un canard attend ta permission.
+Toutes les 30 secondes à 1 minute, il se passe quelque chose : un seul événement à la fois, jamais deux fois le même d'affilée.
 
 - un pigeon se pose sur le rebord d'une fenêtre ; un avion avec une banderole ou une montgolfière passe ; une étoile filante la nuit ;
 - une coupure de courant la nuit (« BZZT ») ;

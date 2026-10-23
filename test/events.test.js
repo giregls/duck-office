@@ -52,45 +52,56 @@ test('every event can be forced, plays to its end and leaves the office clean', 
     fresh(1, ...s.agents);
     assert.ok(E.force(name, now, NOON), name);
     let borrowed = 0;
-    run(4 * MIN, s, () => { borrowed = Math.max(borrowed, [...W.ducks.values()].filter((d) => d.event).length); });
-    assert.equal(E.current() === name, false, `${name} should be over after 4 min`);
+    const end = now + 4 * MIN;
+    while (E.current() === name && now < end) {
+      run(33, s);
+      borrowed = Math.max(borrowed, [...W.ducks.values()].filter((d) => d.event).length);
+    }
+    assert.notEqual(E.current(), name, `${name} should be over after 4 min`);
     assert.deepEqual([...W.ducks.values()].filter((d) => d.event).map((d) => d.id), [], `${name} released its ducks`);
     for (const k of ['coffeeBroken', 'printerJam', 'arcadeFrenzy', 'blackout', 'pizza', 'cake']) assert.ok(!O.dyn[k], `${name} left dyn.${k} on`);
     if (['arcade', 'pizza', 'birthday', 'watering'].includes(name)) assert.ok(borrowed > 0, `${name} borrows idle ducks`);
   }
 });
 
-test('nothing starts while a duck waits for you', () => {
-  fresh(2, idle('a'), idle('b'), session('p', 'permission', { waitingFor: 'permission prompt' }));
-  const s = snap(idle('a'), idle('b'), session('p', 'permission', { waitingFor: 'permission prompt' }));
-  let started = null;
-  run(20 * MIN, s, () => { started = started || E.current(); });
-  assert.equal(started, null);
+// Names of the events seen, in order, and the quiet gaps between two of them (ms).
+function watch(ms, s) {
+  const names = [], gaps = [];
+  let quietSince = null;
+  run(ms, s, () => {
+    const c = E.current();
+    if (!c) { if (quietSince === null) quietSince = now; return; }
+    if (quietSince !== null && names.length) gaps.push(now - quietSince);
+    quietSince = null;
+    if (names[names.length - 1] !== c || gaps.length >= names.length) names.push(c);
+  });
+  return { names, gaps };
+}
+
+test('something happens every 30 s to 1 min, never the same thing twice in a row', () => {
+  fresh(7, idle('a'), idle('b'), idle('c'));
+  const { names, gaps } = watch(30 * MIN, snap(idle('a'), idle('b'), idle('c')));
+  assert.ok(names.length >= 15, `only ${names.length} events in 30 min`);
+  for (const g of gaps) assert.ok(g >= 29000 && g <= 61000, `gap of ${g} ms`);
+  for (let i = 1; i < names.length; i++) assert.notEqual(names[i], names[i - 1], names.join(','));
 });
 
-test('a running event lets its ducks go as soon as somebody waits for you', () => {
-  fresh(3, idle('a'), idle('b'));
-  assert.ok(E.force('arcade', now, NOON, { forced: false })); // started like a natural one
-  run(20000, snap(idle('a'), idle('b')));
-  assert.equal([...W.ducks.values()].filter((d) => d.event).length, 2);
-  run(2000, snap(idle('a'), idle('b'), session('p', 'permission', { waitingFor: 'permission prompt' })));
-  assert.deepEqual([...W.ducks.values()].filter((d) => d.event).map((d) => d.id), []);
+test('events go on while a duck waits for you', () => {
+  const s = snap(idle('a'), idle('b'), session('p', 'permission', { waitingFor: 'permission prompt' }));
+  fresh(2, ...s.agents);
+  const { names } = watch(10 * MIN, s);
+  assert.ok(names.length >= 5, names.join(','));
 });
 
 test('events happen on their own, the same way for the same seed', () => {
   const seen = () => {
     fresh(42, idle('a'), idle('b'), idle('c'));
-    const names = [];
-    run(90 * MIN, snap(idle('a'), idle('b'), idle('c')), () => {
-      const c = E.current();
-      if (c && names[names.length - 1] !== c) names.push(c);
-    });
-    return names;
+    return watch(20 * MIN, snap(idle('a'), idle('b'), idle('c'))).names;
   };
   const first = seen();
-  assert.ok(first.length >= 5, `only ${first.length} events in 90 min`);
+  assert.ok(first.length >= 8, `only ${first.length} events in 20 min`);
   // (their lengths depend on how the ducks walk, so only the order is compared)
-  assert.deepEqual(seen().slice(0, 5), first.slice(0, 5));
+  assert.deepEqual(seen().slice(0, 8), first.slice(0, 8));
 });
 
 test('the cat, the courier and the robot only walk on free floor', () => {

@@ -1,7 +1,6 @@
 // Office events: little scenes that happen now and then, unrelated to the real agents
-// (a pigeon on a window sill, the robot vacuum, a pizza delivery...). One at a time, none
-// starts while a duck waits for you, and they are deterministic (seeded random, frame
-// clock) so tests can drive them. Extras (cat, robot, courier) walk with the ducks' path
+// (a pigeon on a window sill, the robot vacuum, a pizza delivery...). One at a time, one
+// every 30 s to 1 min, and deterministic (seeded random, frame clock) so tests can drive them. Extras (cat, robot, courier) walk with the ducks' path
 // finder; idle ducks (done for 5 min or more) can be borrowed through `duck.event`.
 (function (DO) {
   const O = DO.office, C = DO.C, S = DO.sprites, T = O.T;
@@ -109,13 +108,14 @@
   // ------------------------------------------------------------ the catalogue
   // name, weight (how often), cooldown, mini (allowed in the small window), calm (no need for
   // 20 fps), maxMs (safety net), when(ctx), start(ev, ctx), update(ev, ctx) -> true when over,
-  // abort(ev, ctx) (someone waits for you), stop(ev, ctx), sortables(ev, now), drawWall(g, ev, now).
+  // stop(ev, ctx), sortables(ev, now), drawWall(g, ev, now). The cooldown keeps an event from
+  // coming back too soon (and the same one never plays twice in a row).
   const CATALOG = [];
-  const def = (d) => CATALOG.push(Object.assign({ weight: 1, cooldown: 10 * MIN, mini: false, calm: false, maxMs: 3 * MIN }, d));
+  const def = (d) => CATALOG.push(Object.assign({ weight: 1, cooldown: 3 * MIN, mini: false, calm: false, maxMs: 3 * MIN }, d));
 
   // A pigeon lands outside a window, pecks, looks around and flies off.
   def({
-    name: 'pigeon', weight: 3, cooldown: 4 * MIN, mini: true, maxMs: 30000,
+    name: 'pigeon', weight: 3, cooldown: 1.5 * MIN, mini: true, maxMs: 30000,
     when: (c) => c.phase !== 'night' && O.dyn.weather !== 'storm',
     start(ev) {
       ev.pane = O.PANES[Math.floor(st.rng() * O.PANES.length)];
@@ -142,7 +142,7 @@
   // Something crosses the sky behind every window: a plane with a banner, a hot-air balloon,
   // or a shooting star at night.
   def({
-    name: 'sky', weight: 2, cooldown: 6 * MIN, mini: true, maxMs: 40000,
+    name: 'sky', weight: 2, cooldown: 2 * MIN, mini: true, maxMs: 40000,
     when: () => O.dyn.weather === 'clear' || O.dyn.weather === 'cloudy',
     start(ev, c) {
       ev.kind = c.phase === 'night' ? 'star' : st.rng() < 0.6 ? 'plane' : 'balloon';
@@ -184,12 +184,11 @@
 
   // At night, the power flickers and goes out for two seconds ("BZZT" over the racks).
   def({
-    name: 'blackout', weight: 1, cooldown: 30 * MIN, mini: true, maxMs: 10000,
+    name: 'blackout', weight: 1, cooldown: 20 * MIN, mini: true, maxMs: 10000,
     when: (c) => c.phase === 'night' && c.ducks > 0,
     start() {},
     update(ev, c) {
       const t = c.now - ev.t0;
-      if (ev.aborted) return true;
       O.dyn.blackout = t < 1200 ? Math.floor(t / 110) % 3 !== 0 : t < 3400 ? true : t < 4000 ? Math.floor(t / 90) % 2 === 0 : false;
       return t >= 4000;
     },
@@ -202,7 +201,7 @@
   // The coffee machine breaks down: smoke, a red light; a duck on a break comes to fix it,
   // and in the meantime long commands send the ducks to the water cooler instead.
   def({
-    name: 'coffee', weight: 2, cooldown: 25 * MIN, mini: true, calm: true, maxMs: 2 * MIN,
+    name: 'coffee', weight: 2, cooldown: 15 * MIN, mini: true, calm: true, maxMs: 2 * MIN,
     when: (c) => c.hour >= 7 && c.hour < 20,
     start(ev, c) {
       O.dyn.coffeeBroken = true;
@@ -221,7 +220,7 @@
 
   // Paper jam: red lights, sheets flying out, and a duck on a break comes to sort it out.
   def({
-    name: 'printer', weight: 2, cooldown: 20 * MIN, mini: true, calm: true, maxMs: 90000,
+    name: 'printer', weight: 2, cooldown: 10 * MIN, mini: true, calm: true, maxMs: 90000,
     when: () => true,
     start(ev, c) {
       O.dyn.printerJam = true;
@@ -240,7 +239,7 @@
 
   // The robot vacuum leaves its dock, cleans a few spots of the open space and goes back.
   def({
-    name: 'robot', weight: 2, cooldown: 12 * MIN, maxMs: 3 * MIN,
+    name: 'robot', weight: 2, cooldown: 4 * MIN, maxMs: 3 * MIN,
     when: (c) => c.ducks <= 5 || c.hour >= 18 || c.hour < 8,
     start(ev) {
       const r = st.robot;
@@ -262,7 +261,7 @@
       if (r.spinning) return false;
       if (ev.home) return true;
       ev.i++;
-      if (ev.aborted || ev.i >= ev.stops.length) { ev.home = true; walk(r, DOCK.c, DOCK.r); r.path.push({ x: DOCK.x, y: DOCK.y }); }
+      if (ev.i >= ev.stops.length) { ev.home = true; walk(r, DOCK.c, DOCK.r); r.path.push({ x: DOCK.x, y: DOCK.y }); }
       else walk(r, ev.stops[ev.i].c, ev.stops[ev.i].r);
       return false;
     },
@@ -274,7 +273,7 @@
 
   // Two ducks on a break play a game at the arcade cabinet; the winner gets confetti.
   def({
-    name: 'arcade', weight: 3, cooldown: 10 * MIN, maxMs: 90000,
+    name: 'arcade', weight: 3, cooldown: 4 * MIN, maxMs: 90000,
     when: (c) => c.idle.length >= 2,
     start(ev, c) {
       for (const d of shuffled(c.idle).slice(0, 2)) borrow(ev, d, 'arcade');
@@ -298,7 +297,7 @@
   // The office cat comes out of the elevator, naps on the lounge rug, then leaves.
   const RUG = { c: 4, r: 12 };
   def({
-    name: 'cat', weight: 2, cooldown: 15 * MIN, maxMs: 150000,
+    name: 'cat', weight: 2, cooldown: 5 * MIN, maxMs: 150000,
     when: () => true,
     start(ev, c) {
       ev.cat = npc('cat', O.ELEVATOR.x, O.ELEVATOR.y, 28);
@@ -318,7 +317,7 @@
         if (stepNpc(cat, c.dt)) next('nap');
       } else if (ev.phase === 'nap') {
         if (Math.random() < c.dt * 0.6) DO.world.burst(cat.x + 3, cat.y - 9, 'zz');
-        if (t > ev.nap || ev.aborted) { walk(cat, O.ELEVATOR.c, O.ELEVATOR.r); next('leave'); }
+        if (t > ev.nap) { walk(cat, O.ELEVATOR.c, O.ELEVATOR.r); next('leave'); }
       } else if (ev.phase === 'leave') {
         if (cat.path.length <= 3) ev.door = true;
         if (stepNpc(cat, c.dt)) next('exit');
@@ -334,7 +333,7 @@
   // Lunch (or dinner): a courier brings a pizza to the cafe table; ducks on a break help themselves.
   const DROP = { c: 5, r: 7 };
   def({
-    name: 'pizza', weight: 2, cooldown: 3 * 60 * MIN, maxMs: 150000,
+    name: 'pizza', weight: 2, cooldown: 60 * MIN, maxMs: 150000,
     when: (c) => ((c.hour >= 11.5 && c.hour < 14) || (c.hour >= 19 && c.hour < 21.5)) && c.idle.length >= 1,
     start(ev, c) {
       ev.courier = npc('courier', O.ELEVATOR.x, O.ELEVATOR.y, 40);
@@ -379,7 +378,7 @@
 
   // Somebody's birthday: a cake on the meeting table, the ducks on a break gather around it.
   def({
-    name: 'birthday', weight: 1, cooldown: 20 * 60 * MIN, maxMs: 80000,
+    name: 'birthday', weight: 1, cooldown: 4 * 60 * MIN, maxMs: 80000,
     when: (c) => c.idle.length >= 2 && !O.dyn.meeting && c.hour >= 10 && c.hour < 18,
     start(ev, c) {
       O.dyn.cake = true;
@@ -401,7 +400,7 @@
 
   // A duck on a break waters a plant, which blooms for the rest of the day.
   def({
-    name: 'watering', weight: 2, cooldown: 20 * MIN, maxMs: 70000,
+    name: 'watering', weight: 2, cooldown: 5 * MIN, maxMs: 70000,
     when: (c) => c.idle.length >= 1 && c.hour >= 8 && c.hour < 19,
     start(ev, c) {
       const d = shuffled(c.idle)[0];
@@ -430,7 +429,7 @@
     return {
       now, dt, date, hour: date.getHours() + date.getMinutes() / 60, phase: O.skyPhase(date),
       mini: !!(opts && opts.mini), demo: !!(opts && opts.demo),
-      waiting: s.wait, ducks: s.total, idle: DO.world.idleDucks(now),
+      ducks: s.total, idle: DO.world.idleDucks(now),
     };
   }
 
@@ -445,13 +444,14 @@
     releaseAll(ev);
     if (ev.def.stop) ev.def.stop(ev, ctx);
     st.last[ev.name] = ctx.now;
+    st.lastName = ev.name;
     st.current = null;
-    st.nextAt = ctx.now + between(3 * MIN, 8 * MIN) / (ctx.demo ? 3 : 1);
+    st.nextAt = ctx.now + between(30000, 60000);
   }
 
   function startRandom(ctx) {
-    const ok = CATALOG.filter((d) => (!ctx.mini || d.mini) && ctx.now - (st.last[d.name] ?? -Infinity) >= d.cooldown && d.when(ctx));
-    if (!ok.length) { st.nextAt = ctx.now + MIN; return; }
+    const ok = CATALOG.filter((d) => d.name !== st.lastName && (!ctx.mini || d.mini) && ctx.now - (st.last[d.name] ?? -Infinity) >= d.cooldown && d.when(ctx));
+    if (!ok.length) { st.nextAt = ctx.now + 15000; return; }
     let r = st.rng() * ok.reduce((n, d) => n + d.weight, 0);
     for (const d of ok) {
       r -= d.weight;
@@ -472,26 +472,17 @@
     const ev = st.current;
     if (ev) {
       prune(ev);
-      if (ctx.waiting && !ev.aborted && !ev.forced) { // someone waits for you: cut it short, let the ducks go
-        ev.aborted = true;
-        releaseAll(ev);
-        if (ev.def.abort) ev.def.abort(ev, ctx);
-      }
       if (ev.def.update(ev, ctx) || now - ev.t0 > ev.def.maxMs) finish(ev, ctx);
-    } else if (now >= st.nextAt) {
-      if (ctx.waiting) st.nextAt = now + 20000;
-      else startRandom(ctx);
-    }
+    } else if (now >= st.nextAt) startRandom(ctx);
   }
 
-  // Starts an event right now (screenshots: --event=name), whatever its conditions. A forced
-  // event plays to the end even if a duck waits for you, unless opts.forced is false.
-  function force(name, now, date, opts) {
+  // Starts an event right now (screenshots: --event=name), whatever its conditions.
+  function force(name, now, date) {
     const d = CATALOG.find((x) => x.name === name);
     if (!d) return false;
     const ctx = context(now, { date }, 0.016);
     if (st.current) finish(st.current, ctx);
-    start(d, ctx).forced = !(opts && opts.forced === false);
+    start(d, ctx);
     return true;
   }
 
@@ -500,8 +491,9 @@
     st.rng = DO.rng(seed >>> 0);
     st.current = null;
     st.last = {};
+    st.lastName = null;
     st.lastNow = 0;
-    st.nextAt = now + between(MIN, 2.5 * MIN);
+    st.nextAt = now + between(10000, 30000);
     st.robot = parkedRobot();
     Object.assign(O.dyn, { coffeeBroken: false, printerJam: false, arcadeFrenzy: false, blackout: false, pizza: false, cake: false });
   }

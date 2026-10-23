@@ -19,7 +19,7 @@ Claude Code sessions as pixel-art ducks in an open space. The user speaks French
 - All art is code: grids in `sprites.js`, furniture in `office.js`, palette ENDESGA 32 only (`DO.C`). Internal resolution 480x270, integer scaling.
 - `world.js` uses the frame clock `now` (never `performance.now()`), so tests can drive it.
 - Furniture goes through `furniture()` in `office.js`: it blocks its tiles and its parts are y-sorted with the ducks. Seats are blocked tiles too (only their own duck steps on them). Sprites are lazy (`sprite()`), so `office.js` loads under Node. Animated or seasonal furniture reads `O.dyn` (season, weather, pizza, cake...): the office test draws every season with every extra on.
-- `events.js`: one event at a time, never started while a duck waits (permission/input); decisions use its seeded `st.rng` (cosmetic particles may use `Math.random`). Extras (cat, robot, courier) walk with `DO.world.nav`; idle ducks are borrowed through `duck.event`, read first by `want()`, and must always be released (`finish`/`prune`).
+- `events.js`: one event at a time, the next one 30 s to 1 min after the previous one ends, never the same twice in a row (cooldowns per event); decisions use its seeded `st.rng` (cosmetic particles may use `Math.random`). Extras (cat, robot, courier) walk with `DO.world.nav`; idle ducks are borrowed through `duck.event`, read first by `want()`, and must always be released (`finish`/`prune`).
 
 ## Checks
 
