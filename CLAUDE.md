@@ -18,8 +18,9 @@ Claude Code sessions as pixel-art ducks in an open space. The user speaks French
 - Never display prompts, commands or file contents: titles, file basenames and Bash `description` only.
 - All art is code: grids in `sprites.js`, furniture in `office.js`, palette ENDESGA 32 only (`DO.C`). Internal resolution 480x270, integer scaling.
 - `world.js` uses the frame clock `now` (never `performance.now()`), so tests can drive it.
+- Furniture goes through `furniture()` in `office.js`: it blocks its tiles and its parts are y-sorted with the ducks. Seats are blocked tiles too (only their own duck steps on them). Sprites are lazy (`sprite()`), so `office.js` loads under Node.
 
 ## Checks
 
-- `npm test` (Node 24, glob form) — tracker + duck behaviour with a fake clock.
+- `npm test` (Node 24, glob form) — tracker + duck behaviour with a fake clock + office map (everything reachable, no furniture painted over walkable floor or over other furniture, walking ducks never cross furniture).
 - Visual check: `node_modules/electron/dist/electron.exe . --capture=out.png --demo --no-tracker --hour=14 --seed=7 [--scale=5 --crop=x,y,w,h --select=0 --scenario=hatch|arrive]`, then look at the PNG.

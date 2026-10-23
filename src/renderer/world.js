@@ -192,7 +192,7 @@
         if (dur < 20 * MIN) return W('lounge', 'lounge', 'q', { small: true });
         return W('lounge', 'nap', 'zz', { small: true });
       case 'error': return W('seat', dur < 2500 ? 'panic' : 'think', 'cloud');
-      case 'compacting': return W('seat', 'think', 'squeeze');
+      case 'compacting': return W('station', 'work', 'squeeze', { station: 'printer' }); // tidying its memory: off to the printer
       case 'supervising': return W('seat', 'think', 'eye');
       case 'thinking': return W('seat', 'think', 'dots');
       case 'tool': {
@@ -255,7 +255,7 @@
       arrive(duck, now, true);
       return;
     }
-    const speed = w.urgent ? SPEED.hurry : SPEED.walk;
+    const speed = w.urgent || w.station === 'meeting' ? SPEED.hurry : SPEED.walk; // eager to brief its ducklings
     if (duck.mode === 'desk' && duck.seat) {
       // hop down from the desk first
       startHop(duck, duck.seat.point, () => { duck.tile = duck.seat.tile; walkTo(duck, target.tile, target.point, speed); });
@@ -286,7 +286,7 @@
     // lounging ducks sometimes go for a coffee or look out of the window
     if (a.state === 'done' && now - a.since >= 5 * MIN && now - a.since < 20 * MIN) {
       if (!duck.wander && now > (duck.nextWander || 0)) {
-        const spots = ['coffee', 'cooler', 'window', 'window', 'arcade'];
+        const spots = ['coffee', 'cooler', 'window', 'window', 'arcade', 'vending'];
         duck.wander = { station: spots[Math.floor(Math.random() * spots.length)], until: now + 9000 + Math.random() * 7000 };
         duck.nextWander = now + 40000 + Math.random() * 50000;
       } else if (duck.wander && now > duck.wander.until) duck.wander = null;
@@ -447,7 +447,7 @@
     if (dl.mode === 'pending') {
       if (dl.leaving) { dl.remove = true; return; }
       if (!parent || parent.leaving) { layEggNearElevator(dl, now); return; }
-      if (atMeeting(parent) || now - dl.t0 > 8000) layEgg(dl, parent, now);
+      if (atMeeting(parent) || now - dl.t0 > 16000) layEgg(dl, parent, now);
       return;
     }
     if (dl.mode === 'egg') {
@@ -646,10 +646,15 @@
         p[a.project] = (p[a.project] || 0) + 1;
       }
     }
+    // nameplate = the island's main project; none for the home folder (no project there)
     dyn.podLabels = {};
     for (const [pod, counts] of Object.entries(podProjects)) {
       const best = Object.entries(counts).sort((x, y) => y[1] - x[1])[0][0];
-      dyn.podLabels[pod] = DO.font.norm(best === '~' ? 'home' : best).replace(/[^A-Z0-9]/g, '').slice(0, 4);
+      if (best === '~' || best === '?' || best === 'scratch') continue;
+      const words = DO.font.norm(best).split(/[^A-Z0-9]+/).filter(Boolean); // "duck-office" -> DUCK
+      let label = words[0] || '';
+      if (label.length < 3 && words[1]) label += words[1];
+      dyn.podLabels[pod] = label.slice(0, 6);
     }
     let openWanted = false, coffee = false, terminal = false, globe = false, racks = 0, wb = null;
     for (const duck of ducks.values()) {
@@ -751,10 +756,20 @@
     return { frame, mirror, x: Math.round(x + dx), y: Math.round(y + dy), anchor, alpha };
   }
 
+  // A soft oval under the feet: grounds the ducks, and stays on the floor while they hop.
+  const FOOT_SHADOW = 'rgba(24, 20, 37, 0.28)';
+  function footShadow(g, x, y, rx) {
+    g.fillStyle = FOOT_SHADOW;
+    g.fillRect(Math.round(x) - rx + 1, Math.round(y), rx * 2 - 1, 1);
+    g.fillRect(Math.round(x) - rx + 2, Math.round(y) + 1, rx * 2 - 3, 1);
+  }
+
   function drawDuck(g, duck, now) {
     const f = duckFrame(duck, now);
     duck.rect = { x: f.x, y: f.y, w: 16, h: 16 };
     if (f.alpha < 1) g.globalAlpha = Math.max(0, f.alpha);
+    if (duck.mode === 'desk' && duck.seat && duck.seat.desk) footShadow(g, duck.seat.desk.x, duck.seat.desk.y, 5);
+    else if (duck.mode !== 'sit') footShadow(g, duck.x, duck.y, 5);
     g.drawImage(S.duck(f.frame, duck.breed, f.mirror), f.x, f.y);
     if (duck.hat) {
       const at = S.HAT_AT[f.frame] || [0, 0];
@@ -799,6 +814,7 @@
       if (busy) { frame = tick(dl.agent.state === 'tool' ? 4 : 2) % 2 ? 'front' : 'hop'; dy = frame === 'hop' ? -1 : 0; }
       else frame = 'front';
     }
+    footShadow(g, dl.x, dl.y + 1, 3);
     g.drawImage(S.duckling(frame, dl.breed, mirror), x, y + dy);
     g.globalAlpha = 1;
     dl.rect = { x, y: y + dy, w: 10, h: 10 };

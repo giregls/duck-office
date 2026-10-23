@@ -8,6 +8,7 @@ require('../src/renderer/font.js');
 require('../src/renderer/sprites.js');
 require('../src/renderer/office.js');
 require('../src/renderer/world.js');
+require('../src/renderer/sim.js');
 
 const DO = globalThis.DO;
 const W = DO.world;
@@ -144,6 +145,36 @@ test('ducks waiting for a long time go to the lounge, then nap', () => {
   const d = W.get('s:g');
   assert.equal(d.target.kind, 'lounge');
   assert.equal(d.w.pose, 'nap');
+});
+
+test('walking ducks never cut through furniture or other ducks\' chairs', () => {
+  const O = DO.office;
+  W.reset();
+  DO.sim.start(now, 3);
+  W.ingest(DO.sim.snapshot(now), now);
+  const own = new Map(); // duck id -> tiles it may legitimately walk on (its own seats)
+  const mine = (d) => {
+    let s = own.get(d.id);
+    if (!s) own.set(d.id, (s = new Set()));
+    if (d.seat) { s.add(d.seat.tile.c + ',' + d.seat.tile.r); s.add(d.seat.tile.c + 1 + ',' + d.seat.tile.r); }
+    if (d.target && d.target.lseat) s.add(d.target.lseat.tile.c + ',' + d.target.lseat.tile.r);
+    return s;
+  };
+  const bad = new Set();
+  let fed = now;
+  const end = now + 3 * 60000;
+  while (now < end) {
+    now += 33;
+    if (now - fed >= 400) { W.ingest(DO.sim.snapshot(now), now); fed = now; }
+    W.update(now);
+    for (const d of W.ducks.values()) {
+      const tiles = mine(d);
+      if (d.mode !== 'walk') continue;
+      const c = Math.floor(d.x / O.T), r = Math.floor(d.y / O.T);
+      if (!O.walkable(c, r) && !tiles.has(c + ',' + r)) bad.add(`${d.id} at ${c},${r}`);
+    }
+  }
+  assert.deepEqual([...bad], []);
 });
 
 test('sessions of the same project share a pod', () => {
