@@ -290,6 +290,12 @@
   DUCK.sitf_read_a = withRows(DUCK.sitf_think, { 4: '...kLHHHHHHHk...', 5: NO_EYES, 6: '...keHHHHeHHk...' });
   DUCK.sitf_read_b = withRows(DUCK.sitf_think, { 4: '...kLHHHHHHHk...', 5: NO_EYES, 6: '...kHHeHHHHek...' });
   DUCK.sitf_nap = withRows(DUCK.sitf_think, { 4: '...kLHHHHHHHk...', 5: NO_EYES, 6: '...kHkkHHkkHk...' });
+  // Crouching, halfway between standing and sitting (2 rows lower, feet tucked in).
+  const EMPTY_ROW = '................';
+  DUCK.crouch = [EMPTY_ROW, EMPTY_ROW, ...DUCK.front_a.slice(1, 14), '...kkOkkkkOkk...'];
+  DUCK.crouchb = [EMPTY_ROW, EMPTY_ROW, ...DUCK.back.slice(1, 14), '...kkkkklkkkk...'];
+  // Happy eyes (^ ^): thanking you for a permission.
+  DUCK.happy = withRows(DUCK.front_a, { 4: '...kHeHHHHeHk...', 5: '...keHeHHeHek...' });
 
   // Where the hat goes for each frame, relative to front_a ([dx, dy]).
   const HAT_AT = {
@@ -298,6 +304,7 @@
     side_1: [2, 0], side_2: [2, -1], side_3: [2, 0], side_4: [2, -1],
     sitf_type_a: [0, 1], sitf_type_b: [0, 1], sitf_think: [0, 1], sitf_read_a: [0, 1], sitf_read_b: [0, 1], sitf_nap: [0, 1],
     sitb_type_a: [0, 1], sitb_type_b: [0, 1], sitb_idle: [0, 1],
+    crouch: [0, 2], crouchb: [0, 2], happy: [0, 0],
   };
 
   // Hats tell apart the sessions of a same project. dy = first row's offset.

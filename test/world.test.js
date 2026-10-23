@@ -186,3 +186,65 @@ test('sessions of the same project share a pod', () => {
   assert.notEqual(a.breed, c.breed);
   assert.notEqual(a.hat, b.hat);
 });
+
+test('a duck crouches on its way down to the chair, and again when it gets up', () => {
+  fresh();
+  const modes = new Set();
+  const s = snap(session('k', 'thinking'));
+  run(20000, s);
+  assert.equal(W.get('s:k').mode, 'sit');
+  const t = snap(session('k', 'tool', { since: now, tool: tool('WebFetch', 'web') }));
+  const end = now + 4000;
+  while (now < end) { run(33, t); modes.add(W.get('s:k').mode); }
+  assert.ok(modes.has('rise'), [...modes].join(','));
+  assert.ok(modes.has('walk'));
+  fresh();
+  const seen = new Set();
+  W.ingest(s, now);
+  for (let i = 0; i < 600; i++) { run(33, s); seen.add(W.get('s:k').mode); }
+  assert.ok(seen.has('settle'), [...seen].join(','));
+});
+
+test('a granted permission: a happy nod on the desk, then back to work', () => {
+  fresh(session('n', 'thinking'));
+  run(3000, snap(session('n', 'permission', { since: now, tool: tool('Bash', 'exec'), waitingFor: 'permission prompt' })));
+  const d = W.get('s:n');
+  assert.equal(d.mode, 'desk');
+  const back = snap(session('n', 'tool', { since: now, tool: tool('Bash', 'exec') }));
+  run(400, back);
+  assert.equal(d.mode, 'desk');
+  assert.equal(d.action && d.action.name, 'thanks');
+  assert.equal(W.iconFor(d, now).name, 'check');
+  run(3000, back);
+  assert.notEqual(d.mode, 'desk');
+});
+
+test('a finished todo list: confetti, a tick, and a green whiteboard', () => {
+  fresh(session('t', 'tool', { tool: tool('TodoWrite', 'todo'), todos: { done: 2, total: 4 } }));
+  run(600, snap(session('t', 'tool', { tool: tool('TodoWrite', 'todo'), todos: { done: 4, total: 4 } })));
+  const d = W.get('s:t');
+  assert.equal(W.iconFor(d, now).name, 'check');
+  assert.ok(DO.office.dyn.whiteboardParty);
+  assert.deepEqual(DO.office.dyn.whiteboard, { done: 4, total: 4 });
+});
+
+test('ducklings follow their mother in single file', () => {
+  fresh(session('q', 'thinking'), subagent('q', 'd1', 'thinking'), subagent('q', 'd2', 'thinking'));
+  const s = snap(session('q', 'tool', { since: now, tool: tool('WebFetch', 'web') }), subagent('q', 'd1', 'thinking'), subagent('q', 'd2', 'thinking'));
+  let followed = 0, far = 0;
+  const end = now + 20000;
+  while (now < end) {
+    run(33, s);
+    const mum = W.get('s:q');
+    for (const id of ['a:q:d1', 'a:q:d2']) {
+      const k = W.get(id);
+      if (k.mode !== 'follow') continue;
+      followed++;
+      if (Math.hypot(k.x - mum.x, k.y - mum.y) > 48) far++;
+    }
+  }
+  assert.ok(followed > 20, `followed ${followed} frames`);
+  assert.ok(far < followed / 4, `${far} of ${followed} frames far from the mother`);
+  assert.equal(W.get('s:q').target.station, 'globe');
+  for (const id of ['a:q:d1', 'a:q:d2']) assert.notEqual(W.get(id).mode, 'follow');
+});

@@ -45,7 +45,37 @@ Quand plusieurs sessions Claude Code et leurs sous-agents tournent en même temp
 - **La couleur du canard** indique le projet : les sessions d'un même projet partagent un îlot de bureaux.
 - **Le chapeau** distingue les sessions d'un même projet.
 - **Les bureaux sont face à face :** un canard te regarde par-dessus son portable, celui d'en face te tourne le dos devant son écran allumé.
-- **Les fenêtres suivent l'heure réelle :** jour, coucher de soleil, nuit étoilée avec les lampes allumées.
+- **Les fenêtres suivent l'heure réelle :** jour, coucher de soleil, nuit étoilée. Le soir tombe peu à peu et les lampes s'allument une à une.
+- **Il fait un temps différent chaque heure :** soleil, nuages, pluie (un parapluie s'égoutte au portemanteau), orage ou neige en hiver.
+- **Le bureau se décore selon la saison :** citrouilles et chauves-souris pour Halloween, sapin et guirlandes à Noël.
+
+### Les petites réactions
+
+| Ce qui arrive | Ce que fait le canard |
+|---|---|
+| Tu accordes une permission | Il hoche la tête, content, avant de redescendre de son bureau |
+| Il coche toute sa liste de tâches | Confettis, une coche verte, le tableau blanc tout vert |
+| Une commande dure plus de 20 s | Une goutte de sueur perle sur sa tempe |
+| Une erreur de l'API | Trois petites étoiles tournent au-dessus de sa tête |
+| Un caneton revient de mission | Sa cane le félicite |
+| La cane se déplace | Ses canetons la suivent en file indienne |
+| Il range sa mémoire (compaction) | Des feuilles s'envolent de la photocopieuse |
+
+La nuit, un halo éclaire les canards qui t'attendent, pour que le « ! » et le « ? » ne se perdent jamais dans l'ombre. Le bureau s'éteint quelques minutes après le départ du dernier canard, et se rallume lampe par lampe avec le premier.
+
+### La vie du bureau
+
+De temps en temps, toutes les 3 à 8 minutes, il se passe quelque chose. Il n'arrive qu'un seul événement à la fois, et jamais pendant qu'un canard attend ta permission.
+
+- un pigeon se pose sur le rebord d'une fenêtre ; un avion avec une banderole ou une montgolfière passe ; une étoile filante la nuit ;
+- une coupure de courant la nuit (« BZZT ») ;
+- la machine à café tombe en panne, ou la photocopieuse bourre : un canard en pause vient réparer ;
+- le robot aspirateur fait sa tournée ;
+- le chat du bureau sort de l'ascenseur et fait la sieste sur le tapis ;
+- deux canards en pause font une partie d'arcade ;
+- à midi ou le soir, un livreur apporte une pizza ;
+- un anniversaire, avec un gâteau sur la table de réunion ;
+- un canard arrose une plante, qui fleurit pour le reste de la journée.
 
 **Qui t'attend ?** Un compteur en bas de l'écran, le nombre dans le titre de la fenêtre, le bouton de la barre des tâches qui clignote et un « ! » rouge sur l'icône de la zone de notification.
 
@@ -143,7 +173,7 @@ src/
     icons.js         icônes PNG/ICO dessinées à partir du sprite du canard
     tracker/         lecture de ~/.claude : sessions, journaux, sous-agents, tokens
   renderer/          scripts classiques partageant globalThis.DO, chargés dans l'ordre :
-    palette.js  font.js  sprites.js  office.js  world.js  ui.js  sim.js  app.js
+    palette.js  font.js  sprites.js  office.js  world.js  events.js  ui.js  sim.js  app.js
   shared/tools.js    catégories d'outils et libellés sans données privées
 test/                tests du tracker et du comportement des canards (horloge simulée)
 ```
@@ -159,7 +189,7 @@ Le mode capture enregistre une image sans ouvrir de fenêtre, pratique pour vér
 node_modules/electron/dist/electron.exe . --capture=shot.png --demo --no-tracker --hour=22 --seed=7
 ```
 
-Options : `--scale=3`, `--crop=x,y,w,h`, `--select=0` (ouvre une fiche), `--bilan`, `--scenario=hatch|arrive|busy`, `--frames=90 --frame-interval=110` (une série d'images, comme pour l'animation ci-dessus), `--capture-delay=4000`.
+Options : `--scale=3`, `--crop=x,y,w,h`, `--select=0` (ouvre une fiche), `--bilan`, `--scenario=hatch|arrive|busy`, `--frames=90 --frame-interval=110` (une série d'images, comme pour l'animation ci-dessus), `--capture-delay=4000`, `--weather=clear|cloudy|rain|storm|snow`, `--date=2026-12-24` (décor de saison), `--event=pigeon|sky|blackout|coffee|printer|robot|arcade|cat|pizza|birthday|watering --event-at=500` (force un événement). Lance les captures une par une : en parallèle, elles se disputent le même dossier de cache.
 
 Tout le pixel art est **dessiné par le code**, sans aucun fichier image : les sprites sont des grilles de caractères dans `sprites.js`, les meubles des rectangles dans `office.js`. La palette est [ENDESGA 32](https://lospec.com/palette-list/endesga-32), et l'image interne fait 480 × 270 pixels, agrandie d'un facteur entier pour rester nette.
 

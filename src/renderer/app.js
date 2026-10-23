@@ -7,6 +7,10 @@
   const SEED = Number(params.get('seed')) || 0;
   const SCENARIO = params.get('scenario') || '';
   const MODE = params.get('mode') || 'normal';
+  const DATE = params.get('date') || ''; // checks: --date=2026-12-24
+  const EVENT = params.get('event') || ''; // checks: --event=pigeon (forced after --event-at ms)
+  const EVENT_AT = Number(params.get('eventAt')) || 1500;
+  if (params.get('weather')) DO.office.forceWeather(params.get('weather'));
   const api = window.duckApi || null;
 
   const screen = document.getElementById('screen');
@@ -21,6 +25,9 @@
   let demo = params.get('demo') === '1';
   let live = null;
   let lastSim = 0;
+  const bootAt = Date.now();
+  let eventForced = false;
+  DO.events.reset(SEED || DO.hash(String(bootAt)), bootAt);
 
   document.body.classList.add('mode-' + MODE);
 
@@ -53,6 +60,7 @@
     demo = on;
     DO.ui.demo = on;
     DO.world.reset();
+    DO.events.reset(SEED || DO.hash(String(now)), now);
     DO.ui.selectedId = null;
     if (on) { DO.sim.start(now, SEED, SCENARIO); feedSim(now); }
     else if (live) { DO.world.ingest(live); DO.ui.usage = live.usage || null; }
@@ -106,11 +114,15 @@
   night.height = DO.office.MAP_H;
   const ng = night.getContext('2d');
   let nightKey = '';
-  function drawNight(phase) {
-    const alpha = { night: 0.45, dusk: 0.2, dawn: 0.18, day: 0 }[phase];
+  function drawNight(date, now) {
+    // warm light on the floor around sunset
+    const tint = DO.office.duskTint(date);
+    if (tint) { g.fillStyle = `rgba(247, 118, 34, ${tint})`; g.fillRect(16, 32, W - 32, DO.office.MAP_H - 32); }
+    let alpha = DO.office.nightAlpha(date);
+    if (DO.office.dyn.blackout && alpha) alpha = Math.min(0.75, alpha + 0.25); // power cut
     if (!alpha) return;
-    const lights = DO.office.lights();
-    const key = phase + lights.map((l) => l.x + ',' + l.y).join(';');
+    const lights = DO.office.lights(date, now);
+    const key = alpha + lights.map((l) => l.x + ',' + l.y + ',' + l.r).join(';');
     if (key !== nightKey) {
       nightKey = key;
       ng.globalCompositeOperation = 'source-over';
@@ -127,6 +139,10 @@
   // ---------------------------------------------------------- frame
   function clock(now) {
     const d = new Date(now);
+    if (DATE) {
+      const [y, m, day] = DATE.split('-').map(Number);
+      if (y && m && day) d.setFullYear(y, m - 1, day);
+    }
     if (HOUR !== null && HOUR !== '') d.setHours(Number(HOUR), 20);
     return d;
   }
@@ -139,12 +155,15 @@
 
   function render(now) {
     if (demo && now - lastSim > 400) { lastSim = now; feedSim(now); }
-    DO.world.update(now);
     const date = clock(now);
+    if (EVENT && !eventForced && now - bootAt > EVENT_AT) { eventForced = true; DO.events.force(EVENT, now, date); }
+    DO.events.update(now, { date, mini: MODE === 'mini', demo });
+    DO.world.update(now);
     DO.office.drawBackground(g, date);
     DO.office.drawWallLayer(g, now, date);
+    DO.events.drawWall(g, now);
     DO.world.draw(g, now);
-    drawNight(DO.office.skyPhase(date));
+    drawNight(date, now);
     DO.ui.drawOverlays(g, now);
     DO.ui.drawNotices(g, now);
     DO.ui.drawHud(g, now, { date });
@@ -162,7 +181,7 @@
   let last = 0;
   function loop(t) {
     requestAnimationFrame(loop);
-    if (t - last < (DO.world.busy() ? 48 : 120)) return;
+    if (t - last < (DO.world.busy() || DO.events.busy() ? 48 : 120)) return;
     last = t;
     render(Date.now());
   }

@@ -123,6 +123,10 @@ function createWindow() {
       hour: argv.hour !== undefined ? String(argv.hour) : '',
       seed: argv.seed !== undefined ? String(argv.seed) : '',
       scenario: typeof argv.scenario === 'string' ? argv.scenario : '',
+      weather: typeof argv.weather === 'string' ? argv.weather : '',
+      date: typeof argv.date === 'string' ? argv.date : '',
+      event: typeof argv.event === 'string' ? argv.event : '',
+      eventAt: argv['event-at'] !== undefined ? String(argv['event-at']) : '',
     },
   });
   w.once('ready-to-show', () => { if (!CAPTURE) w.show(); });

@@ -67,16 +67,21 @@ function paintedTiles(f) {
 for (const s of O.SEATS) O.dyn.seats[s.id] = { state: 'tool', cat: 'exec' };
 for (const p of O.PODS) O.dyn.podLabels[p.id] = 'DUCKS';
 O.dyn.globe = true;
+// and every animated extra: umbrella, pizza, cake, projector, paper jam, flowers, arcade game
+Object.assign(O.dyn, { weather: 'rain', pizza: 3, cake: true, meeting: true, printing: true, printerJam: true, arcadeFrenzy: true });
+for (const p of O.STATIONS.plants) O.dyn.flowers[p.plant] = 'today';
+const SEASONS = [null, 'halloween', 'christmas'];
 
 test('no furniture is painted over walkable floor beside or below it', () => {
   const problems = [];
-  for (const f of O.FURN) {
+  for (const season of SEASONS) for (const f of O.FURN) {
+    O.dyn.season = season;
     const own = new Set(f.tiles.map(([c, r]) => c + ',' + r));
     const top = Math.min(...f.tiles.map(([, r]) => r));
     for (const [tile, n] of paintedTiles(f)) {
       const [c, r] = tile.split(',').map(Number);
       if (own.has(tile) || r < top || !O.walkable(c, r)) continue; // tall things may rise over the tile behind
-      problems.push(`${f.name} paints ${n}px on walkable tile ${tile}`);
+      problems.push(`${f.name} (${season}) paints ${n}px on walkable tile ${tile}`);
     }
   }
   assert.deepEqual(problems, []);
@@ -86,10 +91,11 @@ test('no piece of furniture is drawn over another one', () => {
   const owner = new Map();
   for (const f of O.FURN) for (const [c, r] of f.tiles) owner.set(c + ',' + r, f.name);
   const problems = [];
-  for (const f of O.FURN) {
+  for (const season of SEASONS) for (const f of O.FURN) {
+    O.dyn.season = season;
     for (const [tile, n] of paintedTiles(f)) {
       const other = owner.get(tile);
-      if (other && other !== f.name && n > 24) problems.push(`${f.name} covers ${n}px of ${other} (${tile})`);
+      if (other && other !== f.name && n > 24) problems.push(`${f.name} (${season}) covers ${n}px of ${other} (${tile})`);
     }
   }
   assert.deepEqual(problems, []);

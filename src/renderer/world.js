@@ -4,7 +4,8 @@
   const O = DO.office, S = DO.sprites, C = DO.C;
   const DIRS = [[0, -1], [0, 1], [-1, 0], [1, 0]];
   const MIN = 60000;
-  const SPEED = { walk: 42, hurry: 72, duckling: 36 };
+  const SPEED = { walk: 42, hurry: 72, duckling: 36, follow: 80 };
+  const SETTLE_MS = 180; // crouching between standing and sitting
   const WORKING = new Set(['thinking', 'tool', 'compacting', 'supervising', 'error']);
 
   const ducks = new Map(); // agent id -> duck
@@ -90,7 +91,23 @@
   const tileCenter = (t) => ({ x: t.c * O.T + 8, y: t.r * O.T + 13, tile: t });
   const tileOf = (x, y) => ({ c: Math.max(0, Math.min(O.COLS - 1, Math.floor(x / O.T))), r: Math.max(0, Math.min(O.ROWS - 1, Math.floor(y / O.T))) });
 
+  // Ducks remember where they walked: their ducklings follow them in single file.
+  function recordTrail(e, force) {
+    const tr = e.trail || (e.trail = { pts: [], base: 0 });
+    const last = tr.pts[tr.pts.length - 1];
+    if (force || !last || Math.abs(last.x - e.x) + Math.abs(last.y - e.y) >= 3) {
+      tr.pts.push({ x: e.x, y: e.y });
+      if (tr.pts.length > 240) { tr.pts.shift(); tr.base++; }
+    }
+  }
+  const trailEnd = (tr) => tr.base + tr.pts.length;
+
   function walkTo(e, tile, point, speed) {
+    if (e.kind === 'duck') {
+      const fresh = e.mode !== 'walk';
+      recordTrail(e, true);
+      if (fresh) e.walkFrom = trailEnd(e.trail) - 1;
+    }
     const from = e.path.length && e.path[0].tile ? e.path[0].tile : (e.tile || tileOf(e.x, e.y));
     const tiles = findPath(from, tile) || [];
     const pts = [];
@@ -121,6 +138,7 @@
         left = 0;
       }
     }
+    if (e.kind === 'duck') recordTrail(e);
     return e.path.length === 0;
   }
 
@@ -183,6 +201,10 @@
     const t = a.tool;
     const tdur = t ? now - (t.since || now) : 0;
     const W = (kind, pose, icon, extra) => Object.assign({ kind, pose, icon }, extra);
+    // an idle duck taking part in an office event (pizza, arcade game...)
+    const ev = duck.event;
+    if (ev && now < ev.until && a.state === 'done') return W('station', ev.pose || 'work', ev.icon || null, { station: ev.station, small: true });
+    const coffee = O.dyn.coffeeBroken ? 'cooler' : 'coffee'; // out of order: water will do
     switch (a.state) {
       case 'permission': return W('desk', 'alert', 'excl', { urgent: true, blink: true });
       case 'input': return W('desk', 'ask', 'q', { urgent: true });
@@ -191,7 +213,7 @@
         if (duck.wander && now < duck.wander.until) return W('station', 'look', 'q', { station: duck.wander.station, small: true });
         if (dur < 20 * MIN) return W('lounge', 'lounge', 'q', { small: true });
         return W('lounge', 'nap', 'zz', { small: true });
-      case 'error': return W('seat', dur < 2500 ? 'panic' : 'think', 'cloud');
+      case 'error': return W('seat', now < (duck.panicUntil || 0) ? 'panic' : 'think', 'cloud'); // panics at most once a minute
       case 'compacting': return W('station', 'work', 'squeeze', { station: 'printer' }); // tidying its memory: off to the printer
       case 'supervising': return W('seat', 'think', 'eye');
       case 'thinking': return W('seat', 'think', 'dots');
@@ -201,7 +223,7 @@
         if (cat === 'read') return tdur > 5000 ? W('station', 'work', 'book', { station: 'shelves' }) : W('seat', 'read', 'book');
         if (cat === 'search') return tdur > 5000 ? W('station', 'work', 'magnifier', { station: 'filing' }) : W('seat', 'read', 'magnifier');
         if (cat === 'exec') {
-          if (tdur > 45000) return W('station', 'sip', 'mug', { station: 'coffee' });
+          if (tdur > 45000) return W('station', 'sip', 'mug', { station: coffee });
           if (tdur > 3000) return W('station', 'work', 'gear', { station: duck.hashv % 2 ? 'racks' : 'terminal' });
           return W('seat', 'type', 'gear');
         }
@@ -261,7 +283,25 @@
       startHop(duck, duck.seat.point, () => { duck.tile = duck.seat.tile; walkTo(duck, target.tile, target.point, speed); });
       return;
     }
+    if (duck.mode === 'sit') {
+      // get up first
+      rise(duck, now, () => walkTo(duck, target.tile, target.point, speed));
+      return;
+    }
     walkTo(duck, target.tile, target.point, speed);
+  }
+
+  // The chair a sitting duck is on (its desk seat, or a lounge seat).
+  function chairOf(duck) {
+    const t = duck.target;
+    return t && t.kind === 'lounge' ? t.lseat : duck.seat;
+  }
+
+  function rise(duck, now, then) {
+    duck.chair = chairOf(duck);
+    duck.mode = 'rise';
+    duck.t0 = now;
+    duck.after = then;
   }
 
   function arrive(duck, now, instant) {
@@ -273,7 +313,13 @@
       startHop(duck, t.deskPoint, () => { duck.mode = 'desk'; duck.facing = 'down'; duck.arrivedAt = NOW; });
       return;
     }
-    if (t.kind === 'seat' || t.kind === 'lounge') { duck.mode = 'sit'; return; }
+    if (t.kind === 'seat' || t.kind === 'lounge') {
+      if (instant) { duck.mode = 'sit'; return; }
+      duck.chair = t.kind === 'lounge' ? t.lseat : duck.seat;
+      duck.mode = duck.chair ? 'settle' : 'sit';
+      duck.t0 = now;
+      return;
+    }
     if (t.kind === 'standseat') { duck.mode = 'idle'; duck.facing = 'down'; return; }
     if (t.kind === 'elevator') { duck.mode = 'exit'; duck.t0 = now; duck.facing = 'up'; return; }
     duck.mode = 'work';
@@ -286,7 +332,7 @@
     // lounging ducks sometimes go for a coffee or look out of the window
     if (a.state === 'done' && now - a.since >= 5 * MIN && now - a.since < 20 * MIN) {
       if (!duck.wander && now > (duck.nextWander || 0)) {
-        const spots = ['coffee', 'cooler', 'window', 'window', 'arcade', 'vending'];
+        const spots = [O.dyn.coffeeBroken ? 'cooler' : 'coffee', 'cooler', 'window', 'window', 'arcade', 'vending'];
         duck.wander = { station: spots[Math.floor(Math.random() * spots.length)], until: now + 9000 + Math.random() * 7000 };
         duck.nextWander = now + 40000 + Math.random() * 50000;
       } else if (duck.wander && now > duck.wander.until) duck.wander = null;
@@ -296,6 +342,7 @@
     w.key = w.kind === 'station' ? 'station:' + w.station : w.kind;
     duck.w = w;
     if (w.key !== duck.wantKey) { duck.wantKey = w.key; duck.wantSince = now; }
+    if (duck.action && duck.action.hold && now < duck.action.until) return; // finishing a little thank-you on its desk
     const cur = duck.target;
     if (cur && cur.key === w.key) return;
     const settled = now - duck.wantSince;
@@ -389,8 +436,7 @@
       duck.agent = a;
       duck.missingSince = 0;
       if (duck.leaving && duck.mode !== 'exit') { duck.leaving = false; duck.target = null; duck.wantKey = null; }
-      if (prev !== a && WORKING.has(prev.state) && a.state === 'done') duck.action = { name: 'cheer', until: now + 1300 };
-      if (prev !== a && prev.state !== 'permission' && a.state === 'permission') duck.alertAt = now;
+      if (prev !== a) react(duck, prev, a, now);
     }
     for (const a of agents.filter((x) => x.kind === 'subagent')) {
       seen.add(a.id);
@@ -407,6 +453,29 @@
       if (!duck.missingSince) duck.missingSince = now;
     }
     for (const dl of ducklings.values()) if (!seen.has(dl.id)) dl.leaving = true;
+  }
+
+  // Little reactions to what the agent just did (prev -> a: two snapshots in a row).
+  function react(duck, prev, a, now) {
+    if (WORKING.has(prev.state) && a.state === 'done') duck.action = { name: 'cheer', until: now + 1300 };
+    if (prev.state !== 'permission' && a.state === 'permission') duck.alertAt = now;
+    // permission granted: a happy nod on the desk before going back to work
+    if (prev.state === 'permission' && (a.state === 'tool' || a.state === 'thinking') && duck.mode === 'desk') {
+      duck.action = { name: 'thanks', until: now + 1100, hold: true };
+      duck.flash = { icon: 'check', until: now + 1100 };
+    }
+    if (prev.state !== 'error' && a.state === 'error' && now - (duck.panicAt || -Infinity) > MIN) {
+      duck.panicAt = now;
+      duck.panicUntil = now + 2500;
+    }
+    // the whole todo list is ticked off
+    const pt = prev.todos, nt = a.todos;
+    if (pt && nt && nt.total >= 3 && nt.done >= nt.total && pt.done < pt.total) {
+      duck.action = { name: 'cheer', until: now + 1500 };
+      duck.flash = { icon: 'check', until: now + 2500 };
+      burst(duck.x, duck.y - 20, 'confetti');
+      O.dyn.listDone = { total: nt.total, until: now + 5000 };
+    }
   }
 
   // ------------------------------------------------------------ ducklings
@@ -497,6 +566,10 @@
       }
       return;
     }
+    if (dl.mode === 'follow') {
+      followParent(dl, parent, dt);
+      return;
+    }
     // idle: decide where to be
     if (dl.leaving) {
       if (dl.returning) return;
@@ -504,7 +577,12 @@
       if (parent && !parent.leaving && parent.mode !== 'exit') {
         const off = dl.hashv % 2 ? 9 : -9;
         const goal = { x: parent.x + off, y: parent.y + 1 };
-        const done = () => { dl.mode = 'report'; dl.t0 = NOW; dl.facing = off > 0 ? 'left' : 'right'; };
+        const done = () => {
+          dl.mode = 'report'; dl.t0 = NOW; dl.facing = off > 0 ? 'left' : 'right';
+          // the mother duck is proud of it (unless she is busy waiting for you)
+          const p = ducks.get(dl.parentId);
+          if (p && !(p.w && p.w.urgent) && (p.mode === 'sit' || p.mode === 'idle' || p.mode === 'work')) p.action = { name: 'cheer', until: NOW + 1000 };
+        };
         if (dl.slot && dl.slot.desk) {
           dl.hopAnchor = dl.slot.anchor; // stay in front of the desk while jumping off it
           startHop(dl, tileCenter(parent.seat ? parent.seat.tile : tileOf(parent.x, parent.y)), () => { dl.hopAnchor = 0; goTo(dl, goal, done); }, 300);
@@ -516,6 +594,8 @@
       return;
     }
     if (!parent) return;
+    if (parent.mode === 'rise') return; // she is getting up: wait to see where she goes
+    if (parent.mode === 'walk' && startFollow(dl, parent)) return;
     if (now < (dl.moveAfter || 0)) return;
     const slots = slotsFor(parent);
     if (dl.slotKey === parent.slotsKey && dl.slot) return;
@@ -539,6 +619,49 @@
       dl.hopAnchor = old.anchor;
       startHop(dl, tileCenter(parent.seat.tile), () => { dl.hopAnchor = 0; go(); }, 300);
     } else go();
+  }
+
+  // The mother duck sets off: the ducklings next to her fall in line behind her.
+  function startFollow(dl, parent) {
+    const tr = parent.trail;
+    if (!tr || parent.walkFrom === undefined || parent.walkFrom < tr.base) return false;
+    const p0 = tr.pts[parent.walkFrom - tr.base];
+    if (!p0 || Math.hypot(p0.x - dl.x, p0.y - dl.y) > 64) return false;
+    const old = dl.slot;
+    dl.cursor = parent.walkFrom;
+    dl.slot = null;
+    dl.slotKey = null;
+    dl.moveAfter = 0;
+    if (old && old.desk) {
+      // jump off the desk first
+      dl.hopAnchor = old.anchor;
+      startHop(dl, { x: p0.x, y: p0.y }, () => { dl.hopAnchor = 0; dl.mode = 'follow'; }, 300);
+    } else dl.mode = 'follow';
+    return true;
+  }
+
+  function followParent(dl, parent, dt) {
+    const tr = parent && parent.trail;
+    if (!tr || dl.leaving || parent.leaving) { dl.mode = 'idle'; dl.slotKey = null; return; }
+    const line = [...ducklings.values()].filter((d) => d.parentId === dl.parentId && !d.leaving).sort((a, b) => a.order - b.order);
+    const rank = Math.max(0, line.indexOf(dl));
+    const limit = trailEnd(tr) - 1 - (rank + 1) * 3; // keep a little gap with the one in front
+    if (dl.cursor < tr.base) dl.cursor = tr.base;
+    let left = SPEED.follow * dt;
+    while (left > 0 && dl.cursor <= limit) {
+      const p = tr.pts[dl.cursor - tr.base];
+      const dx = p.x - dl.x, dy = p.y - dl.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 0.01) {
+        if (Math.abs(dx) > Math.abs(dy)) dl.facing = dx > 0 ? 'right' : 'left';
+        else dl.facing = dy > 0 ? 'down' : 'up';
+      }
+      if (d <= left) { dl.x = p.x; dl.y = p.y; left -= d; dl.cursor++; }
+      else { dl.x += (dx / d) * left; dl.y += (dy / d) * left; left = 0; }
+    }
+    dl.tile = tileOf(dl.x, dl.y);
+    // the mother has arrived and the duckling caught up: off to its own place next to her
+    if (parent.mode !== 'walk' && dl.cursor > limit) { dl.mode = 'idle'; dl.slotKey = null; dl.slot = null; }
   }
 
   function layEggNearElevator(dl, now) {
@@ -567,6 +690,8 @@
     if (kind === 'spark') add({ x, y, vx: (Math.random() - 0.5) * 20, vy: -15 - Math.random() * 10, g: 40, life: 0.35, col: Math.random() < 0.5 ? C.yellow : C.cyan, size: 1, ambient: true });
     if (kind === 'heart') add({ x, y, vx: 0, vy: -10, g: 0, life: 1.1, icon: 'heart', col: C.hot });
     if (kind === 'zz') add({ x, y, vx: 4, vy: -6, g: 0, life: 1.8, text: 'z', col: C.white, ambient: true });
+    if (kind === 'paper') add({ x, y, vx: (Math.random() - 0.5) * 30, vy: -22 - Math.random() * 14, g: 60, life: 0.9, col: Math.random() < 0.3 ? C.silver : C.white, size: 2, ambient: true });
+    if (kind === 'smoke') add({ x, y, vx: (Math.random() - 0.5) * 6, vy: -8 - Math.random() * 5, g: 0, life: 1.4, col: Math.random() < 0.5 ? C.grey : C.steel, size: 2, ambient: true });
   }
 
   function updateParticles(dt) {
@@ -594,6 +719,7 @@
         duck.target = { key: 'elevator', kind: 'elevator', tile: { c: e.c, r: e.r }, point: { x: e.x, y: e.y } };
         // (the session may come back during the hop: then decide() picks a new target)
         if (duck.mode === 'desk' && duck.seat) startHop(duck, duck.seat.point, () => { duck.tile = duck.seat.tile; if (duck.leaving && duck.target) walkTo(duck, duck.target.tile, duck.target.point, SPEED.walk); });
+        else if (duck.mode === 'sit') rise(duck, now, () => { if (duck.leaving && duck.target) walkTo(duck, duck.target.tile, duck.target.point, SPEED.walk); });
         else walkTo(duck, duck.target.tile, duck.target.point, SPEED.walk);
       }
       if (duck.mode === 'enter') {
@@ -616,11 +742,25 @@
         if (k >= 1) { duck.hop = null; duck.mode = 'idle'; if (h.then) h.then(); }
         continue;
       }
+      if (duck.mode === 'settle') {
+        if (now - duck.t0 < SETTLE_MS) continue;
+        duck.mode = 'sit';
+      }
+      if (duck.mode === 'rise') {
+        if (now - duck.t0 < SETTLE_MS) continue;
+        duck.mode = 'idle';
+        const then = duck.after;
+        duck.after = null;
+        if (then) then();
+        continue;
+      }
       if (duck.mode === 'walk' && step(duck, dt)) arrive(duck, now);
       decide(duck, now);
       // a few sparks fly from busy keyboards
       if (duck.mode === 'sit' && duck.w && duck.w.pose === 'type-fast' && Math.random() < dt * 3) burst(duck.x + (Math.random() - 0.5) * 10, duck.y - 4, 'spark');
       if (duck.mode === 'sit' && duck.w && duck.w.pose === 'nap' && Math.random() < dt * 0.5) burst(duck.x + 4, duck.y - 18, 'zz');
+      // compacting its memory: sheets fly out of the printer
+      if (duck.mode === 'work' && duck.target && duck.target.station === 'printer' && Math.random() < dt * 1.5) burst(214 + Math.random() * 8, 240, 'paper');
       if (duck.action && now > duck.action.until) duck.action = null;
     }
     for (const dl of [...ducklings.values()]) {
@@ -633,6 +773,7 @@
   }
 
   let door = 0;
+  let emptySince = 0;
   function updateOffice(now, dt) {
     const dyn = O.dyn;
     dyn.seats = {};
@@ -656,7 +797,8 @@
       if (label.length < 3 && words[1]) label += words[1];
       dyn.podLabels[pod] = label.slice(0, 6);
     }
-    let openWanted = false, coffee = false, terminal = false, globe = false, racks = 0, wb = null;
+    let openWanted = false, coffee = false, terminal = false, globe = false, racks = 0, wb = null, meeting = false, printing = false;
+    dyn.alerts = [];
     for (const duck of ducks.values()) {
       if (duck.mode === 'enter' || duck.mode === 'exit') openWanted = true;
       if (duck.leaving && duck.mode === 'walk' && duck.path.length <= 2) openWanted = true;
@@ -666,17 +808,42 @@
         if (t.station === 'terminal') terminal = true;
         if (t.station === 'globe') globe = true;
         if (t.station === 'whiteboard' && duck.agent.todos) wb = duck.agent.todos;
+        if (t.station === 'meeting' && !duck.event) meeting = true;
+        if (t.station === 'printer') printing = true;
       }
       if (duck.agent.tool && duck.agent.tool.cat === 'exec') racks++;
+      // a little light on the ducks that wait for you, so "!" and "?" never sink into the night
+      const st = duck.agent.state;
+      if (!duck.leaving && (st === 'permission' || st === 'input')) {
+        const p = duck.mode === 'desk' && duck.seat && duck.seat.desk ? duck.seat.desk : duck;
+        dyn.alerts.push({ x: Math.round(p.x), y: Math.round(p.y) - 8 });
+      }
     }
-    for (const dl of ducklings.values()) if (dl.mode === 'exit') openWanted = true;
+    for (const dl of ducklings.values()) {
+      if (dl.mode === 'exit') openWanted = true;
+      if (dl.onTable) meeting = true;
+    }
+    if (DO.events && DO.events.wantsDoor()) openWanted = true;
+    // the whole todo list was just ticked off: the whiteboard turns green for a moment
+    dyn.whiteboardParty = !!(dyn.listDone && now < dyn.listDone.until);
+    if (dyn.whiteboardParty) wb = { done: dyn.listDone.total, total: dyn.listDone.total };
+    // the lights come on with the first duck and go off a while after the last one left
+    if (ducks.size) {
+      if (dyn.lampsOff) { dyn.lampsOff = false; dyn.lampsOnAt = now; }
+      emptySince = 0;
+    } else {
+      if (!emptySince) emptySince = now;
+      if (now - emptySince > 150000) dyn.lampsOff = true;
+    }
     door = Math.max(0, Math.min(1, door + (openWanted ? 4 : -3) * dt));
     dyn.elevator = door;
-    dyn.coffee = coffee || Math.floor(now / 9000) % 4 === 0;
+    dyn.coffee = !dyn.coffeeBroken && (coffee || Math.floor(now / 9000) % 4 === 0);
     dyn.terminal = terminal;
     dyn.globe = globe;
     dyn.racks = racks;
     dyn.whiteboard = wb;
+    dyn.meeting = meeting;
+    dyn.printing = printing;
   }
 
   // ------------------------------------------------------------ drawing
@@ -724,16 +891,29 @@
         else if (pose === 'panic') { frame = 'sitb_idle'; dx = tick(14) % 2 ? 1 : -1; }
         else { frame = 'sitb_idle'; dy = pose === 'read' && tick(1) % 2 ? 1 : 0; }
       }
+    } else if (duck.mode === 'settle' || duck.mode === 'rise') {
+      // crouching on the way down to the chair (or up from it)
+      const s = duck.chair;
+      let k = Math.min(1, (now - duck.t0) / SETTLE_MS);
+      if (duck.mode === 'rise') k = 1 - k;
+      if (s) {
+        x = duck.x - 8 + (s.sit.x - (duck.x - 8)) * k;
+        y = duck.y - 15 + (s.sit.y - (duck.y - 15)) * k;
+        anchor = s.sit.anchor;
+        frame = s.sit.view === 'back' ? 'crouchb' : 'crouch';
+      } else frame = 'crouch';
     } else if (duck.mode === 'desk') {
       const p = duck.seat.desk;
       x = p.x - 8; y = p.y - 15; anchor = p.anchor;
-      if (act === 'cheer') { frame = tick(8) % 2 ? 'cheer' : 'front_a'; dy = tick(8) % 2 ? -2 : 0; }
+      if (act === 'thanks') { frame = 'happy'; dy = tick(6) % 2; }
+      else if (act === 'cheer') { frame = tick(8) % 2 ? 'cheer' : 'front_a'; dy = tick(8) % 2 ? -2 : 0; }
       else if (w.pose === 'alert') { const k = tick(4) % 2; frame = k ? 'raise' : 'front_a'; dy = k ? -2 : 0; }
       else if (w.pose === 'ask') { frame = tick(2) % 3 === 0 ? 'front_a' : 'raise'; }
       else { frame = blinkFrame(duck, now) ? 'front_blink' : tick(2) % 2 ? 'front_a' : 'front_b'; }
     } else if (duck.mode === 'work') {
       const f = duck.facing;
-      if (w.pose === 'look' || w.pose === 'lounge' || w.pose === 'nap') {
+      if (act === 'cheer') { frame = tick(8) % 2 ? 'cheer' : 'front_a'; dy = tick(8) % 2 ? -2 : 0; }
+      else if (w.pose === 'look' || w.pose === 'lounge' || w.pose === 'nap') {
         frame = f === 'up' ? 'back' : f === 'down' ? 'front_a' : 'side_1'; mirror = f === 'left';
         dy = tick(1) % 2 ? 1 : 0;
       } else if (f === 'left' || f === 'right') { frame = tick(4) % 2 ? 'side_1' : 'side_2'; mirror = f === 'left'; if (frame === 'side_2') dy = 1; }
@@ -769,18 +949,50 @@
     duck.rect = { x: f.x, y: f.y, w: 16, h: 16 };
     if (f.alpha < 1) g.globalAlpha = Math.max(0, f.alpha);
     if (duck.mode === 'desk' && duck.seat && duck.seat.desk) footShadow(g, duck.seat.desk.x, duck.seat.desk.y, 5);
-    else if (duck.mode !== 'sit') footShadow(g, duck.x, duck.y, 5);
+    else if (duck.mode !== 'sit' && duck.mode !== 'settle' && duck.mode !== 'rise') footShadow(g, duck.x, duck.y, 5);
     g.drawImage(S.duck(f.frame, duck.breed, f.mirror), f.x, f.y);
+    const at = S.HAT_AT[f.frame] || [0, 0];
     if (duck.hat) {
-      const at = S.HAT_AT[f.frame] || [0, 0];
       const hatDx = f.mirror ? -at[0] : at[0];
       const spin = duck.hat === 'propeller' && duck.agent.state === 'thinking' ? Math.floor(now / 120) : 0;
       const img = S.hat(duck.hat, spin);
       if (img) g.drawImage(img, f.x + hatDx, f.y + at[1] + S.HATS[duck.hat].dy);
     }
+    if (f.alpha >= 1 && sweating(duck, now)) drawSweat(g, f, at, now + duck.hashv);
     g.globalAlpha = 1;
-    duck.head = { x: f.x + 8 + (f.frame.startsWith('side') ? (f.mirror ? -2 : 2) : 0), y: f.y + (S.HAT_AT[f.frame] || [0, 0])[1] + (duck.hat ? S.HATS[duck.hat].dy : 1) };
+    duck.head = { x: f.x + 8 + (f.frame.startsWith('side') ? (f.mirror ? -2 : 2) : 0), y: f.y + at[1] + (duck.hat ? S.HATS[duck.hat].dy : 1) };
     duck.backSeat = f.frame.startsWith('sitb'); // its screen is right above its head
+    if (now < (duck.panicUntil || 0) + 1500) drawDizzy(g, duck.head.x, duck.head.y + 1, now);
+  }
+
+  // A long command (or a permission you leave hanging) makes the duck sweat.
+  function sweating(duck, now) {
+    const a = duck.agent;
+    if (duck.leaving || duck.mode === 'enter') return false;
+    if (a.state === 'tool' && a.tool && a.tool.cat === 'exec') return now - (a.tool.since || now) > 20000;
+    return a.state === 'permission' && now - (a.since || now) > 2 * MIN;
+  }
+
+  function drawSweat(g, f, at, t) {
+    const phase = t % 1200;
+    if (phase >= 900) return;
+    const slide = Math.floor(phase / 225);
+    // on the temple, or behind the head for a duck seen from the side
+    const side = f.frame.startsWith('side');
+    const x = f.x + (side ? (f.mirror ? 10 : 4) : 13);
+    const y = f.y + at[1] + 3 + slide;
+    g.fillStyle = C.cyan; g.fillRect(x + 1, y, 1, 1); g.fillRect(x, y + 1, 2, 2);
+    g.fillStyle = C.white; g.fillRect(x, y + 1, 1, 1);
+  }
+
+  // Three little stars circling the head after an API error.
+  function drawDizzy(g, hx, hy, now) {
+    for (let k = 0; k < 3; k++) {
+      const ang = now / 220 + (k * Math.PI * 2) / 3;
+      const sx = Math.round(hx + Math.cos(ang) * 8), sy = Math.round(hy - 2 + Math.sin(ang) * 2);
+      g.fillStyle = k ? C.yellow : C.white;
+      g.fillRect(sx, sy - 1, 1, 3); g.fillRect(sx - 1, sy, 3, 1);
+    }
   }
 
   function drawDuckling(g, dl, now) {
@@ -796,7 +1008,7 @@
       return;
     }
     let frame = 'front', mirror = false, dy = 0;
-    if (dl.mode === 'walk' || dl.mode === 'hop') {
+    if (dl.mode === 'walk' || dl.mode === 'hop' || dl.mode === 'follow') {
       if (dl.facing === 'left' || dl.facing === 'right') { frame = tick(8) % 2 ? 'side' : 'side_hop'; mirror = dl.facing === 'left'; }
       else frame = dl.facing === 'up' ? 'back' : tick(8) % 2 ? 'front' : 'hop';
       dy = tick(8) % 2 ? -1 : 0;
@@ -834,6 +1046,7 @@
 
   function draw(g, now) {
     const list = O.sortables().slice();
+    if (DO.events) for (const it of DO.events.sortables(now)) list.push(it);
     for (const duck of ducks.values()) list.push({ y: anchorOf(duck), draw: (gg) => drawDuck(gg, duck, now) });
     for (const dl of ducklings.values()) list.push({ y: anchorOf(dl), draw: (gg) => drawDuckling(gg, dl, now) });
     list.sort((a, b) => a.y - b.y);
@@ -864,10 +1077,12 @@
     if (e.mode === 'enter' || e.leaving) return null;
     const w = e.w;
     if (!w) return null;
+    if (e.flash && now < e.flash.until && !(w.urgent && !w.soft)) return { name: e.flash.icon, ink: C.green };
     let name = w.icon;
+    if (!name) return null;
     if (name === 'dots') name = 'dots' + (1 + (Math.floor(now / 400) % 3));
     if (name === 'gear') name = Math.floor(now / 250) % 2 ? 'gear_a' : 'gear_b';
-    const ink = w.blink ? (Math.floor(now / 250) % 2 ? C.hot : C.wine) : name === 'cloud' ? C.steel : name === 'q' && w.urgent && !w.soft ? C.deep : C.navy;
+    const ink = w.blink ? (Math.floor(now / 250) % 2 ? C.hot : C.wine) : name === 'cloud' ? C.steel : name === 'heart' ? C.hot : name === 'q' && w.urgent && !w.soft ? C.deep : C.navy;
     return { name, ink, urgent: !!w.urgent, soft: !!w.soft, blink: !!w.blink, small: !!w.small };
   }
   const ICON_BY_CAT = { edit: 'pencil', read: 'book', search: 'magnifier', exec: 'gear_a', web: 'globe', agent: 'egg', todo: 'clipboard', mcp: 'plug', other: 'plug', ask: 'q' };
@@ -900,7 +1115,7 @@
     return { work, wait, done, idle, kids, waiting, total: ducks.size };
   }
 
-  const MOVING = new Set(['walk', 'hop', 'enter', 'exit', 'egg', 'hatch', 'report']);
+  const MOVING = new Set(['walk', 'hop', 'enter', 'exit', 'egg', 'hatch', 'report', 'settle', 'rise', 'follow']);
   function busy() {
     if (particles.some((p) => !p.ambient)) return true; // typing sparks and zZ don't need 30 fps
     for (const e of ducks.values()) if (MOVING.has(e.mode) || e.action) return true;
@@ -913,7 +1128,19 @@
     seatOwner.clear(); loungeOwner.clear(); spotOwner.clear();
     firstSnapshot = true;
     lastUpdate = 0;
+    emptySince = 0;
+    O.dyn.listDone = null;
   }
 
-  DO.world = { ingest, update, draw, hitTest, summary, iconFor, entities, reset, busy, get: (id) => ducks.get(id) || ducklings.get(id), ducks, ducklings, burst };
+  // Ducks on a long break (done for 5 min or more): the office events may borrow them.
+  function idleDucks(now) {
+    const selected = DO.ui && DO.ui.selectedId;
+    return [...ducks.values()].filter((d) => !d.leaving && !d.event && d.id !== selected && d.mode !== 'enter' && d.mode !== 'exit'
+      && d.agent.state === 'done' && now - d.agent.since >= 5 * MIN);
+  }
+
+  // Path finding and walking, shared with the office events' extras (cat, robot...).
+  const nav = { findPath, walkTo, step, tileOf, tileCenter, startHop };
+
+  DO.world = { ingest, update, draw, hitTest, summary, iconFor, entities, reset, busy, get: (id) => ducks.get(id) || ducklings.get(id), ducks, ducklings, burst, idleDucks, nav, footShadow };
 })(globalThis.DO = globalThis.DO || {});

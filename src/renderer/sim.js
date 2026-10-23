@@ -123,7 +123,10 @@
         const cat = pick(['edit', 'edit', 'read', 'read', 'search', 'exec', 'exec', 'web', 'todo', 'mcp']);
         const dur = { edit: [2000, 6000], read: [1500, 9000], search: [1500, 8000], exec: [2000, 25000], web: [5000, 12000], todo: [2500, 5000], mcp: [2000, 5000] }[cat];
         setState(s, 'tool', now, toolFor(cat, now));
-        if (cat === 'todo') s.todos = { done: Math.floor(rnd() * 5), total: 5 };
+        if (cat === 'todo') { // ticks one or two more items; a full list starts a new one
+          const t = s.todos;
+          s.todos = !t || t.done >= t.total ? { done: 0, total: 3 + Math.floor(rnd() * 3) } : { done: Math.min(t.total, t.done + 1 + Math.floor(rnd() * 2)), total: t.total };
+        }
         s.next = now + between(dur[0], dur[1]) * (cat === 'exec' && rnd() < 0.15 ? 3 : 1);
       }
     }

@@ -148,9 +148,15 @@
     meeting: [spot(22, 11, 'right'), spot(27, 11, 'left'), spot(22, 12, 'right'), spot(27, 12, 'left')],
     printer: [spot(13, 14, 'down'), spot(14, 14, 'down')],
     window: [spot(8, 2, 'up'), spot(9, 2, 'up'), spot(14, 2, 'up'), spot(15, 2, 'up'), spot(19, 2, 'up')],
-    arcade: [spot(1, 11, 'up')],
+    arcade: [spot(1, 11, 'up'), spot(2, 12, 'up')], // the second player waits for their turn behind
     elevator: [spot(16, 2, 'up'), spot(17, 2, 'up')],
+    // used by the office events (pizza, watering the plants)
+    cafe: [spot(2, 6, 'right'), spot(5, 6, 'left')],
+    plants: [spot(7, 9, 'up'), spot(8, 14, 'down'), spot(20, 14, 'down'), spot(20, 3, 'up'), spot(27, 7, 'right')],
   };
+  // the plant each "plants" spot looks after
+  const PLANT_OF = ['7,8', '8,15', '20,15', '20,2', '28,7'];
+  STATIONS.plants.forEach((s, i) => { s.plant = PLANT_OF[i]; });
   STATIONS.meeting.forEach((s, i) => { s.eggs = { x: i % 2 === 0 ? 372 : 424, y: 184 + (i > 1 ? 10 : 0), dir: i % 2 === 0 ? 1 : -1 }; });
   const ELEVATOR = { x: 272, y: 45, c: 16, r: 2 };
 
@@ -176,12 +182,57 @@
     dawn: [C.slate, C.magenta, C.gold],
     day: [C.blue, C.blue, C.cyan],
     dusk: [C.slate, C.plum, C.orange],
+    grey: [C.steel, C.grey, C.silver],
+    storm: [C.slate, C.steel, C.grey],
   };
+
+  // Night falls slowly: 0 by day, up to 0.45 at night (rounded so the mask can be cached).
+  function nightAlpha(date) {
+    const h = date.getHours() + date.getMinutes() / 60;
+    let a;
+    if (h >= 21 || h < 5.5) a = 0.45;
+    else if (h < 7.5) a = (0.45 * (7.5 - h)) / 2;
+    else if (h < 17.5) a = greyDay() ? 0.1 : 0; // a rainy day is a little darker
+    else a = Math.max(greyDay() ? 0.1 : 0, (0.45 * (h - 17.5)) / 3.5);
+    return Math.round(a * 20) / 20;
+  }
+  // A warm orange veil on the floor around sunset.
+  function duskTint(date) {
+    const h = date.getHours() + date.getMinutes() / 60;
+    if (h < 17 || h > 20.5 || greyDay()) return 0;
+    return Math.round(0.07 * (1 - Math.abs(h - 18.75) / 1.75) * 100) / 100;
+  }
+  const greyDay = () => dyn.weather === 'rain' || dyn.weather === 'storm' || dyn.weather === 'snow';
+
+  // Seasonal decorations, from the date.
+  function season(date) {
+    const m = date.getMonth(), d = date.getDate();
+    if ((m === 9 && d >= 15) || (m === 10 && d <= 2)) return 'halloween';
+    if (m === 11 || (m === 0 && d <= 6)) return 'christmas';
+    return null;
+  }
+
+  // Simulated weather: one draw per hour, the same for everyone that day (seeded by the date).
+  let forcedWeather = null;
+  function weatherAt(date) {
+    if (forcedWeather) return forcedWeather;
+    const m = date.getMonth();
+    const key = date.getFullYear() + '-' + m + '-' + date.getDate() + '-' + date.getHours();
+    const r = DO.rng(DO.hash(key))();
+    const winter = m === 11 || m <= 1, summer = m >= 5 && m <= 7;
+    const table = winter ? [['snow', 0.22], ['rain', 0.1], ['cloudy', 0.25]]
+      : summer ? [['storm', 0.06], ['rain', 0.08], ['cloudy', 0.15]]
+      : [['storm', 0.04], ['rain', 0.2], ['cloudy', 0.25]];
+    let acc = 0;
+    for (const [w, p] of table) { acc += p; if (r < acc) return w; }
+    return 'clear';
+  }
   // Windows on the north wall: [x, width].
   const WINDOWS = [[32, 32], [128, 32], [224, 32], [292, 28], [384, 32]];
 
-  function drawSky(g, x0, y0, w, h, phase, now) {
-    const cols = SKY[phase];
+  function drawSky(g, x0, y0, w, h, phase, now, weather) {
+    const overcast = weather === 'rain' || weather === 'snow' || weather === 'storm';
+    const cols = phase !== 'night' && overcast ? SKY[weather === 'storm' ? 'storm' : 'grey'] : SKY[phase];
     for (let y = 0; y < h; y++) {
       const t = y / h;
       const band = t < 0.4 ? 0 : t < 0.75 ? 1 : 2;
@@ -193,29 +244,37 @@
       }
     }
     if (phase === 'night') {
-      const rnd = DO.rng(42);
-      for (let i = 0; i < 70; i++) {
-        const sx = Math.floor(rnd() * W), sy = Math.floor(rnd() * h * 0.7);
-        if (sx >= x0 && sx < x0 + w && (now / 900 + i) % 7 > 0.6) P(g, sx, y0 + sy, i % 5 ? C.white : C.yellow);
+      if (!overcast && weather !== 'cloudy') {
+        const rnd = DO.rng(42);
+        for (let i = 0; i < 70; i++) {
+          const sx = Math.floor(rnd() * W), sy = Math.floor(rnd() * h * 0.7);
+          if (sx >= x0 && sx < x0 + w && (now / 900 + i) % 7 > 0.6) P(g, sx, y0 + sy, i % 5 ? C.white : C.yellow);
+        }
       }
-      if (x0 === 226) { // moon
+      if (x0 === 226 && !overcast) { // moon
         R(g, x0 + 18, y0 + 3, 5, 5, C.yellow); R(g, x0 + 19, y0 + 2, 3, 1, C.yellow); R(g, x0 + 19, y0 + 8, 3, 1, C.yellow);
         R(g, x0 + 20, y0 + 3, 3, 4, SKY.night[0]);
       }
-    } else if (phase === 'day' || phase === 'dawn') {
+    }
+    if (phase !== 'night' && (phase !== 'dusk' || weather !== 'clear')) {
       // clouds drift across the whole wall, one sky behind every window
-      for (const [base, cy, cw] of [[0, 3, 12], [170, 7, 9], [330, 2, 14]]) {
-        const cx = Math.floor(((base + now / 4000) % (W + 40)) - 20);
+      const many = weather !== 'clear';
+      const list = many ? [[0, 3, 12], [90, 8, 10], [170, 7, 9], [250, 1, 13], [330, 2, 14], [410, 6, 11]] : [[0, 3, 12], [170, 7, 9], [330, 2, 14]];
+      const body = overcast ? (weather === 'storm' ? C.steel : C.silver) : C.white;
+      const under = overcast ? (weather === 'storm' ? C.slate : C.grey) : C.silver;
+      for (const [base, cy, cw] of list) {
+        const cx = Math.floor(((base + now / (weather === 'storm' ? 1500 : 4000)) % (W + 40)) - 20);
         for (let k = 0; k < cw; k++) {
           const px = cx + k;
           if (px < x0 || px >= x0 + w) continue;
           const top = k < 2 || k > cw - 3 ? 1 : 0;
-          R(g, px, y0 + cy + top, 1, 3 - top, C.white);
-          if (k > 2 && k < cw - 4) P(g, px, y0 + cy - 1, C.white);
-          P(g, px, y0 + cy + 3, C.silver);
+          R(g, px, y0 + cy + top, 1, 3 - top, body);
+          if (k > 2 && k < cw - 4) P(g, px, y0 + cy - 1, body);
+          P(g, px, y0 + cy + 3, under);
         }
       }
-    } else if (phase === 'dusk' && x0 === 130) {
+    }
+    if (phase === 'dusk' && x0 === 130 && !overcast) {
       R(g, x0 + 10, y0 + h - 6, 7, 4, C.gold); R(g, x0 + 11, y0 + h - 7, 5, 1, C.gold);
     }
     // city skyline at the bottom of every window
@@ -551,13 +610,21 @@
     elevator: 0, // door openness 0..1
     coffee: false, terminal: false, racks: 0, globe: false,
     whiteboard: null, // { done, total }
+    whiteboardParty: false, listDone: null, // a todo list was just completed
     podLabels: {},
+    alerts: [], // where the ducks waiting for you stand (lit at night)
+    lampsOff: false, lampsOnAt: -Infinity, // lamps go off in an empty office, back on one by one
+    meeting: false, printing: false,
+    season: null, weather: 'clear',
+    // office events (events.js)
+    coffeeBroken: false, printerJam: false, arcadeFrenzy: false, blackout: false, pizza: false, cake: false,
+    flowers: {}, // plant tile -> watered today (it blooms)
   };
 
   let winCache = null;
   let winKey = '';
   function drawWindows(g, phase, now) {
-    const key = phase + ':' + Math.floor(now / 1000);
+    const key = phase + ':' + dyn.weather + ':' + Math.floor(now / 1000);
     if (key !== winKey) {
       winKey = key;
       winCache = winCache || canvas(W, 26);
@@ -565,7 +632,7 @@
       wg.clearRect(0, 0, W, 26);
       WINDOWS.forEach(([x, w], i) => {
         R(wg, x + 1, 5, w - 2, 18, C.white);
-        drawSky(wg, x + 2, 6, w - 4, 15, phase, now);
+        drawSky(wg, x + 2, 6, w - 4, 15, phase, now, dyn.weather);
         R(wg, x + (w >> 1) - 1, 6, 2, 15, C.white); // mullion
         R(wg, x + 2, 12, w - 4, 1, C.white); // transom
         // tied curtains
@@ -583,26 +650,104 @@
     g.drawImage(winCache, 0, 0);
   }
 
-  // sun patches on the floor under the windows
+  // The sky seen between the curtains of each window: [x0, x1) (rain, pigeons... go there).
+  const PANES = WINDOWS.map(([x, w]) => ({ x0: x + 5, x1: x + w - 5, mid: x + (w >> 1) - 1, y0: 6, y1: 21 }));
+
+  // sun patches on the floor under the windows; their slant follows the sun
   let beamCache = null;
   let beamKey = '';
-  function drawSunbeams(g, phase) {
-    if (phase === 'night') return;
-    if (beamKey !== phase) {
-      beamKey = phase;
+  function drawSunbeams(g, phase, date) {
+    if (phase === 'night' || greyDay()) return;
+    const h = date.getHours() + date.getMinutes() / 60;
+    const slant = Math.max(-1, Math.min(1, (h - 13) / 5)); // morning: to the left, afternoon: to the right
+    const key = phase + ':' + Math.round(slant * 8);
+    if (beamKey !== key) {
+      beamKey = key;
       beamCache = beamCache || canvas(W, 80);
       const bg = beamCache.getContext('2d');
       bg.clearRect(0, 0, W, 80);
-      bg.fillStyle = phase === 'day' ? 'rgba(255, 255, 255, 0.13)' : 'rgba(254, 174, 52, 0.12)';
+      bg.fillStyle = phase === 'day' ? 'rgba(255, 255, 255, 0.18)' : 'rgba(254, 174, 52, 0.15)';
       // only windows above free floor (not above the kitchen counter or the filing cabinet)
       for (const [x, w] of WINDOWS.slice(1, 4)) {
         for (let y = 0; y < 26; y++) {
-          const shift = Math.floor(y / 2);
+          const shift = Math.round(y * 0.6 * slant);
           bg.fillRect(x + 4 + shift, 34 + y, w - 8, 1);
         }
       }
     }
     g.drawImage(beamCache, 0, 0);
+  }
+
+  // Rain, snow and lightning, drawn every frame over the cached windows.
+  function drawWeather(g, now, phase) {
+    const wx = dyn.weather;
+    if (wx !== 'rain' && wx !== 'storm' && wx !== 'snow') return;
+    const flash = wx === 'storm' && Math.floor(now / 90) % 197 === 0;
+    PANES.forEach((p, i) => {
+      const inPane = (x, y) => x >= p.x0 && x < p.x1 && (x < p.mid || x > p.mid + 1) && y >= p.y0 && y < p.y1 && y !== 12;
+      if (flash) {
+        g.fillStyle = C.white;
+        for (let y = p.y0; y < p.y1; y++) if (y !== 12) { g.fillRect(p.x0, y, p.mid - p.x0, 1); g.fillRect(p.mid + 2, y, p.x1 - p.mid - 2, 1); }
+        return;
+      }
+      const width = p.x1 - p.x0;
+      if (wx === 'snow') {
+        for (let k = 0; k < 6; k++) {
+          const y = p.y0 + Math.floor((now / 260 + k * 5 + i * 3) % 15);
+          const x = p.x0 + ((k * 7 + i * 5) % width) + Math.round(Math.sin(now / 700 + k) * 1.5);
+          if (inPane(x, y)) P(g, x, y, C.white);
+        }
+        return;
+      }
+      g.fillStyle = phase === 'night' ? C.steel : C.deep;
+      const drops = wx === 'storm' ? 9 : 6;
+      for (let k = 0; k < drops; k++) {
+        const fall = (now / 28 + k * 5 + i * 7) % 17;
+        const y = p.y0 + Math.floor(fall) - 1;
+        const x = p.x0 + ((k * 5 + i * 3) % width) - Math.floor(fall / 5);
+        if (inPane(x, y)) g.fillRect(x, y, 1, 1);
+        if (inPane(x, y + 1)) g.fillRect(x, y + 1, 1, 1);
+      }
+      // drops bouncing on the sill
+      if ((Math.floor(now / 160) + i) % 3 === 0) P(g, p.x0 + ((Math.floor(now / 160) * 7 + i) % width), 21, C.silver);
+    });
+  }
+
+  // Seasonal decorations on the wall: Halloween bunting and pumpkins, Christmas lights.
+  function drawSeasonWall(g, now, phase) {
+    const s = dyn.season;
+    if (!s) return;
+    const dark = phase === 'night' || phase === 'dusk';
+    const sag = (x) => 4 + Math.round(1.5 * (1 - Math.cos(((x - 16) / 80) * Math.PI * 2)));
+    for (let x = 16; x < W - 16; x++) P(g, x, sag(x), C.outline);
+    for (let x = 20, k = 0; x < W - 20; x += 8, k++) {
+      const y = sag(x) + 1;
+      if (s === 'halloween') {
+        if (k % 5 === 2) { // a little bat
+          R(g, x - 1, y, 5, 1, C.black); P(g, x - 2, y - 1, C.black); P(g, x + 4, y - 1, C.black); R(g, x, y + 1, 3, 1, C.black);
+          P(g, x + 1, y, C.red);
+        } else {
+          const col = [C.orange, C.plum, C.amber][k % 3];
+          R(g, x, y, 3, 1, col); P(g, x + 1, y + 1, col);
+        }
+      } else {
+        const cols = [C.red, C.gold, C.cyan, C.lime];
+        const on = (Math.floor(now / 600) + k) % 4 !== 0;
+        P(g, x + 1, y, C.outline);
+        R(g, x, y + 1, 3, 2, on ? cols[k % 4] : C.slate);
+        if (on && dark) P(g, x + 1, y + 1, C.white);
+      }
+    }
+    if (s === 'halloween') {
+      // pumpkins on the window sills and on the kitchen counter
+      for (const x of [WINDOWS[0][0] + 7, WINDOWS[2][0] + 7, WINDOWS[4][0] + 7, 44]) {
+        const y = x === 44 ? 27 : 17;
+        R(g, x, y, 6, 4, C.outline); R(g, x + 1, y, 4, 4, C.orange); R(g, x + 1, y, 1, 3, C.gold);
+        P(g, x + 3, y - 1, C.green);
+        P(g, x + 2, y + 1, dark ? C.yellow : C.outline); P(g, x + 4, y + 1, dark ? C.yellow : C.outline);
+        R(g, x + 2, y + 3, 3, 1, dark ? C.yellow : C.rust);
+      }
+    }
   }
 
   function drawElevator(g, now) {
@@ -626,7 +771,8 @@
   }
 
   function drawCoffee(g, now) {
-    P(g, 58, 18, Math.floor(now / 600) % 2 ? C.lime : C.green);
+    if (dyn.coffeeBroken) P(g, 58, 18, Math.floor(now / 200) % 2 ? C.red : C.wine); // out of order
+    else P(g, 58, 18, Math.floor(now / 600) % 2 ? C.lime : C.green);
     R(g, 53, 25, 5, 4, C.white); R(g, 53, 25, 5, 1, C.brown); P(g, 58, 26, C.white); // cup
     if (dyn.coffee) {
       for (let k = 0; k < 3; k++) {
@@ -646,6 +792,11 @@
 
   function drawTerminalScreen(g, now) {
     R(g, 419, 20, 11, 9, C.black);
+    if (dyn.blackout) return;
+    if (dyn.lampsOff) { // asleep: just a slow cursor
+      if (Math.floor(now / 1000) % 2) P(g, 420, 27, C.green);
+      return;
+    }
     const busy = dyn.terminal;
     const scroll = busy ? Math.floor(now / 150) : Math.floor(now / 2000);
     for (let line = 0; line < 4; line++) {
@@ -662,7 +813,7 @@
       for (let row = 0; row < 9; row++) {
         const y = 10 + row * 4;
         for (let k = 0; k < 3; k++) {
-          const on = (((tick + row * 7 + k * 3 + ri * 5) * 2654435761) >>> 0) % 5 < (dyn.racks > 0 ? 3 : 2);
+          const on = !dyn.blackout && (((tick + row * 7 + k * 3 + ri * 5) * 2654435761) >>> 0) % 5 < (dyn.racks > 0 ? 3 : 2);
           const col = k === 2 && row % 3 === 0 && dyn.racks > 1 ? C.gold : C.lime;
           P(g, x + 3 + k * 2, y, on ? col : C.forest);
         }
@@ -681,12 +832,35 @@
       R(g, x, y + k * 3, 2, 2, done ? C.green : C.steel);
       R(g, x + 3, y + k * 3, 6 + ((k * 5) % 9), 1, done ? C.grey : C.blue);
     }
+    if (dyn.whiteboardParty) {
+      // a big green tick next to the finished list
+      for (let k = 0; k < 4; k++) R(g, x + 33 + k, y + 7 - k * 2, 1, 2, C.green);
+      R(g, x + 30, y + 5, 1, 2, C.green); R(g, x + 31, y + 6, 1, 2, C.green); R(g, x + 32, y + 7, 1, 2, C.green);
+    }
+  }
+
+  // The tube light under the kitchen cabinets flickers now and then.
+  function drawNeon(g, now) {
+    if (dyn.blackout || dyn.lampsOff) return;
+    const t = Math.floor(now / 70);
+    const flicker = t % 131 < 4 && t % 2 === 0;
+    R(g, 66, 19, 44, 1, flicker ? C.tan : C.cream);
+  }
+
+  // The second hand: a red dot running around the rim of the wall clock.
+  function drawSecondHand(g, date) {
+    const a = (date.getSeconds() / 60) * Math.PI * 2;
+    P(g, 328 + Math.round(Math.sin(a) * 4), 12 - Math.round(Math.cos(a) * 4), C.hot);
   }
 
   function drawWallLayer(g, now, date) {
     const phase = skyPhase(date);
-    drawSunbeams(g, phase);
+    drawSunbeams(g, phase, date);
     drawWindows(g, phase, now);
+    drawWeather(g, now, phase);
+    drawSeasonWall(g, now, phase);
+    drawNeon(g, now);
+    drawSecondHand(g, date);
     drawElevator(g, now);
     drawCoffee(g, now);
     drawCoolerBubbles(g, now);
@@ -704,6 +878,7 @@
 
   function seatScreenColor(s, now) {
     if (!s) return null;
+    if (dyn.blackout) return C.navy;
     if ((s.state === 'permission' || s.state === 'input') && Math.floor(now / 400) % 2) return C.hot;
     if (s.state === 'tool' && s.cat) return CAT_SCREEN[s.cat] || C.blue;
     return STATE_SCREEN[s.state] || C.slate;
@@ -811,7 +986,7 @@
             // monitor on its stand, keyboard and mouse
             R(g, s.cx - 7, Y0 + 24, 14, 10, C.outline);
             R(g, s.cx - 6, Y0 + 25, 12, 8, st ? seatScreenColor(st, now) : C.navy);
-            if (st) drawScreenContent(g, s.cx - 6, Y0 + 25, st, now);
+            if (st && !dyn.blackout) drawScreenContent(g, s.cx - 6, Y0 + 25, st, now);
             else R(g, s.cx - 5, Y0 + 26, 3, 1, C.slate); // reflection on the dark screen
             R(g, s.cx - 1, Y0 + 34, 2, 2, C.outline); R(g, s.cx - 3, Y0 + 36, 6, 1, C.outline);
             R(g, s.cx - 6, Y0 + 39, 12, 3, C.outline); R(g, s.cx - 5, Y0 + 39, 10, 1, C.silver); R(g, s.cx - 5, Y0 + 40, 10, 1, C.grey);
@@ -892,7 +1067,17 @@
       R(g, 9, 2, 4, 3, C.white); R(g, 9, 2, 4, 1, C.brown); R(g, 9, 2, 1, 3, C.outline); // cup
       R(g, 19, 3, 5, 2, C.gold); P(g, 20, 2, C.yellow); P(g, 22, 2, C.yellow); // croissant
     });
-    furniture('cafe table', rect(3, 6, 2, 1), [{ y: 6 * T + 12, draw: (g) => g.drawImage(table(), 48, 6 * T) }]);
+    furniture('cafe table', rect(3, 6, 2, 1), [{ y: 6 * T + 12, draw: (g) => {
+      g.drawImage(table(), 48, 6 * T);
+      if (dyn.pizza) { // an open pizza box (office event)
+        const y = 6 * T + 2;
+        R(g, 56, y - 4, 16, 9, C.outline); R(g, 57, y - 3, 14, 7, C.sand);
+        oval(g, 64, y, 5, 2, C.gold); oval(g, 64, y, 4, 1, C.orange);
+        P(g, 62, y - 1, C.red); P(g, 66, y, C.red); P(g, 64, y + 1, C.red); P(g, 63, y, C.lime);
+        const eaten = dyn.pizza === true ? 0 : dyn.pizza; // slices already taken
+        for (let k = 0; k < eaten; k++) P(g, 60 + k * 2, y, C.sand);
+      }
+    } }]);
     FURN[FURN.length - 1].shadow = (g) => softShadow(g, 64, 6 * T + 15, 10, 1);
     // stools (their tiles are seats)
     for (const s of LOUNGE.filter((x) => x.id.startsWith('stool'))) {
@@ -926,6 +1111,11 @@
       P(g, x + 8, y + 20, C.red); P(g, x + 10, y + 20, C.yellow); P(g, x + 12, y + 20, C.cyan);
       R(g, x + 5, y + 24, 5, 2, C.outline); P(g, x + 7, y + 24, C.gold); // coin door
       R(g, x + 1, y + 28, 13, 1, C.black);
+      if (dyn.arcadeFrenzy) { // a two-player game: the screen goes wild, the marquee flashes
+        const k = Math.floor(now / 70);
+        for (let n = 0; n < 6; n++) P(g, x + 3 + ((k * 3 + n * 5) % 9), y + 9 + ((k + n * 3) % 7), [C.yellow, C.hot, C.cyan][n % 3]);
+        if (k % 2) R(g, x + 2, y + 2, 11, 1, C.yellow);
+      }
     } }]);
     FURN[FURN.length - 1].shadow = (g) => shade(g, 18, 10 * T + 15, 14, 1);
 
@@ -1019,7 +1209,7 @@
 
   // ---------------------------------------------------------------- open space extras
   function makeOpenSpace() {
-    furniture('coat rack', [[18, 2]], [{ y: 2 * T + 15, draw: (g) => {
+    furniture('coat rack', [[18, 2]], [{ y: 2 * T + 15, draw: (g, now) => {
       const x = 18 * T + 8;
       oval(g, x, 2 * T + 14, 4, 1, C.outline);
       R(g, x, 12, 1, 34, C.mahogany); P(g, x, 12, C.brown);
@@ -1027,6 +1217,11 @@
       R(g, x - 6, 15, 5, 14, C.outline); R(g, x - 5, 16, 3, 12, C.blue); R(g, x - 5, 16, 1, 12, C.cyan); // a coat
       R(g, x + 2, 15, 3, 10, C.red); P(g, x + 3, 25, C.wine); // a scarf
       R(g, x - 3, 9, 7, 3, C.outline); R(g, x - 2, 9, 5, 2, C.brown); R(g, x - 3, 11, 7, 1, C.mahogany); // hat
+      if (dyn.weather === 'rain' || dyn.weather === 'storm') { // a wet umbrella dripping on the floor
+        R(g, x + 3, 35, 3, 9, C.outline); R(g, x + 4, 36, 1, 7, C.red); P(g, x + 4, 35, C.wine);
+        R(g, x + 4, 44, 1, 2, C.mahogany); P(g, x + 3, 45, C.mahogany);
+        if (Math.floor(now / 400) % 3 === 0) P(g, x + 6, 46, C.cyan);
+      }
     } }]);
     const printer = sprite(28, 22, (g) => {
       panel(g, 0, 4, 28, 18, C.silver, C.white, C.grey);
@@ -1036,11 +1231,55 @@
       R(g, 2, 13, 24, 1, C.grey); R(g, 2, 17, 24, 1, C.grey); // paper drawers
       R(g, 12, 15, 4, 1, C.steel); R(g, 12, 19, 4, 1, C.steel);
     });
-    furniture('printer', rect(13, 15, 2, 1), [{ y: 15 * T + 15, draw: (g) => g.drawImage(printer(), 13 * T + 2, 15 * T - 6) }]);
+    const PX = 13 * T + 2, PY = 15 * T - 6;
+    furniture('printer', rect(13, 15, 2, 1), [{ y: 15 * T + 15, draw: (g, now) => {
+      g.drawImage(printer(), PX, PY);
+      if (dyn.printerJam) { // paper jam: red lights
+        const on = Math.floor(now / 180) % 2;
+        P(g, PX + 17, PY + 8, on ? C.red : C.wine); P(g, PX + 19, PY + 8, on ? C.wine : C.red);
+      } else P(g, PX + 17, PY + 8, Math.floor(now / 700) % 2 ? C.lime : C.forest);
+      if (dyn.printing) R(g, PX + 4, PY + 5 + (Math.floor(now / 150) % 3), 8, 2, C.white); // a sheet coming out
+    } }]);
     plant(20, 2, 'fig');
     plant(8, 15, 'snake');
     plant(20, 15, 'bush');
+    // seasonal corner: a stack of pumpkins at Halloween, a tree at Christmas, a fern otherwise
+    furniture('seasonal corner', [[19, 15]], [{ y: 15 * T + 15, draw: (g, now) => drawSeasonCorner(g, 19 * T, 15 * T, now) }]);
   }
+
+  function drawSeasonCorner(g, x, y, now) {
+    if (dyn.season === 'halloween') {
+      const pumpkin = (px, py, w, h) => {
+        R(g, px, py, w, h, C.outline); R(g, px + 1, py + 1, w - 2, h - 2, C.orange);
+        R(g, px + 2, py + 1, 1, h - 2, C.gold); R(g, px + (w >> 1), py + 1, 1, h - 2, C.amber);
+        R(g, px + (w >> 1), py - 2, 1, 2, C.forest);
+      };
+      pumpkin(x + 2, y + 7, 12, 8);
+      pumpkin(x + 4, y, 8, 6);
+      const glow = Math.floor(now / 300) % 5 ? C.yellow : C.gold;
+      P(g, x + 5, y + 9, glow); P(g, x + 10, y + 9, glow); R(g, x + 5, y + 12, 6, 1, glow); P(g, x + 7, y + 11, glow);
+      P(g, x + 6, y + 2, C.outline); P(g, x + 9, y + 2, C.outline);
+      softShadowNow(g, x + 8, y + 15, 7);
+    } else if (dyn.season === 'christmas') {
+      R(g, x + 6, y + 10, 4, 5, C.outline); R(g, x + 7, y + 10, 2, 4, C.rust); // pot
+      const layers = [[-12, 2], [-9, 3], [-6, 4], [-3, 5], [0, 6], [3, 7], [6, 7]];
+      for (const [dy, half] of layers) {
+        R(g, x + 8 - half - 1, y + dy, half * 2 + 2, 3, C.pine);
+        R(g, x + 8 - half, y + dy, half * 2, 2, C.forest);
+        R(g, x + 8 - half + 1, y + dy, half, 1, C.green);
+      }
+      R(g, x + 7, y - 15, 2, 2, C.yellow); P(g, x + 8, y - 16, C.yellow); // star
+      const cols = [C.red, C.gold, C.cyan, C.pink];
+      [[5, -8], [10, -5], [4, -2], [11, 1], [7, 4], [3, 7], [12, 7], [8, -11]].forEach(([dx, dy], k) => {
+        const on = (Math.floor(now / 500) + k) % 3 !== 0;
+        P(g, x + dx, y + dy, on ? cols[k % 4] : C.forest);
+      });
+    } else {
+      R(g, x + 4, y + 9, 8, 7, C.outline); R(g, x + 5, y + 10, 6, 5, C.slate); R(g, x + 5, y + 10, 6, 1, C.steel);
+      drawFoliage(g, x, y + plantBob(19, 15, now), 'fern');
+    }
+  }
+  function softShadowNow(g, cx, cy, rx) { g.fillStyle = SHADOW; g.fillRect(cx - rx, cy, rx * 2 + 1, 1); }
 
   // ---------------------------------------------------------------- library
   function makeLibrary() {
@@ -1123,8 +1362,25 @@
       if (s.sit.view === 'front') parts.push({ y: s.sit.anchor - 6, draw: (g) => drawChairNorth(g, s.point.x, s.tile.r * T) });
       else parts.push({ y: s.tile.r * T + 13, draw: (g) => drawChairSouth(g, s.point.x, s.tile.r * T) });
     }
-    parts.push({ y: 13 * T, draw: (g) => g.drawImage(table(), 368, 175) });
+    parts.push({ y: 13 * T, draw: (g, now) => {
+      g.drawImage(table(), 368, 175);
+      if (dyn.meeting) dither(g, 372, 179, 56, 24, 'rgba(44, 232, 245, 0.35)', Math.floor(now / 500) % 2); // the projector's light
+      if (dyn.cake) drawCake(g, 392, 182, now);
+    } });
     furniture('meeting table', rect(23, 11, 4, 2), parts);
+    // a screen on a stand, in the east corner of the room
+    furniture('meeting screen', rect(28, 11, 1, 2), [{ y: 12 * T + 15, draw: (g, now) => {
+      const x = 28 * T + 1, y = 11 * T - 6;
+      oval(g, x + 7, 12 * T + 14, 5, 1, C.outline);
+      R(g, x + 6, y + 14, 2, 22, C.outline); R(g, x + 6, y + 14, 1, 22, C.steel);
+      panel(g, x, y, 14, 14, C.navy, C.slate, C.black);
+      R(g, x + 2, y + 2, 10, 9, C.black);
+      if (dyn.meeting && !dyn.blackout) { // briefing: a little egg and a progress bar
+        R(g, x + 2, y + 2, 10, 9, C.deep);
+        g.drawImage(DO.sprites.egg('whole', 0), x + 4, y + 2);
+        R(g, x + 3, y + 9, 1 + (Math.floor(now / 300) % 8), 1, C.lime);
+      } else P(g, x + 3, y + 3, C.slate);
+    } }]);
     FURN[FURN.length - 1].shadow = (g) => shade(g, 369, 214, 63, 2);
     const sideboard = sprite(64, 20, (g) => {
       panel(g, 0, 4, 64, 16, C.brown, C.wood, C.mahogany);
@@ -1138,43 +1394,71 @@
     plant(28, 15, 'monstera');
   }
 
+  // Birthday cake with flickering candles (meeting table, office event).
+  function drawCake(g, x, y, now) {
+    R(g, x, y + 6, 16, 8, C.outline);
+    R(g, x + 1, y + 7, 14, 6, C.pink); R(g, x + 1, y + 7, 14, 2, C.white); // icing
+    R(g, x + 1, y + 11, 14, 1, C.magenta);
+    for (let k = 0; k < 3; k++) {
+      const cx = x + 4 + k * 4;
+      R(g, cx, y + 3, 1, 4, [C.cyan, C.yellow, C.lime][k]);
+      P(g, cx, y + 2 - ((Math.floor(now / 160) + k) % 2), C.gold);
+      P(g, cx, y + 1, C.yellow);
+    }
+  }
+
   // ---------------------------------------------------------------- plants
+  // Plants breathe: now and then their leaves rise by one pixel.
+  function plantBob(c, r, now) {
+    return Math.floor((now || 0) / 1100 + c * 3 + r * 5) % 7 === 0 ? -1 : 0;
+  }
+
   function plant(c, r, kind) {
     const x = c * T, y = r * T;
-    furniture('plant ' + kind, [[c, r]], [{ y: y + 15, draw: (g) => {
+    furniture('plant ' + kind, [[c, r]], [{ y: y + 15, draw: (g, now) => {
       R(g, x + 4, y + 9, 8, 7, C.outline); R(g, x + 5, y + 10, 6, 5, C.rust); R(g, x + 5, y + 10, 6, 1, C.amber); R(g, x + 9, y + 11, 1, 3, C.rust);
-      if (kind === 'fig') {
-        R(g, x + 7, y - 6, 2, 16, C.mahogany);
-        for (const [dx, dy] of [[-1, -16], [3, -14], [-4, -11], [5, -9], [-2, -6], [2, -4], [-5, -3], [6, -12]]) {
-          R(g, x + 6 + dx, y + dy, 4, 3, C.green); P(g, x + 6 + dx, y + dy, C.lime);
+      drawFoliage(g, x, y + plantBob(c, r, now), kind);
+      if (dyn.flowers[c + ',' + r]) { // watered today: it blooms
+        for (const [dx, dy] of [[3, -4], [11, -2], [7, 1]]) {
+          P(g, x + dx, y + dy, C.pink); P(g, x + dx - 1, y + dy + 1, C.pink); P(g, x + dx + 1, y + dy + 1, C.pink); P(g, x + dx, y + dy + 2, C.pink);
+          P(g, x + dx, y + dy + 1, C.yellow);
         }
-      } else if (kind === 'snake') {
-        for (const [dx, h] of [[5, 12], [7, 15], [9, 11], [6, 8], [10, 9]]) {
-          R(g, x + dx, y + 9 - h, 2, h, C.green); P(g, x + dx, y + 9 - h, C.lime); P(g, x + dx + 1, y + 11 - h, C.gold);
-        }
-      } else if (kind === 'monstera') {
-        R(g, x + 7, y - 2, 2, 12, C.forest);
-        for (const [dx, dy, w, h] of [[0, -6, 6, 5], [8, -8, 6, 6], [2, 0, 5, 4], [9, -1, 6, 4], [4, -11, 6, 5]]) {
-          R(g, x + dx, y + dy, w, h, C.green); R(g, x + dx, y + dy, w, 1, C.lime); P(g, x + dx + 2, y + dy + 2, C.forest);
-        }
-      } else if (kind === 'fern') {
-        // arching fronds with little leaflets
-        for (const [dir, len, lift] of [[-1, 7, 0.9], [1, 7, 0.9], [-0.6, 6, 1.5], [0.6, 6, 1.5], [-0.15, 6, 2.1], [0.2, 5, 2.2]]) {
-          for (let k = 1; k <= len; k++) {
-            const fx = Math.round(x + 8 + dir * k);
-            const fy = Math.round(y + 9 - k * lift + k * k * 0.13);
-            P(g, fx, fy, C.forest);
-            P(g, fx, fy - 1, k % 2 ? C.lime : C.green);
-            if (k > 1 && k < len) { P(g, fx - 1, fy - 1, C.green); P(g, fx + 1, fy - 2, C.lime); }
-          }
-        }
-      } else { // bush
-        oval(g, x + 8, y + 4, 7, 6, C.forest);
-        oval(g, x + 7, y + 3, 6, 5, C.green);
-        P(g, x + 5, y + 1, C.lime); P(g, x + 9, y, C.lime); P(g, x + 4, y + 5, C.lime); P(g, x + 11, y + 4, C.lime);
       }
     } }]);
     FURN[FURN.length - 1].shadow = (g) => softShadow(g, x + 8, y + 15, 5, 1);
+  }
+
+  function drawFoliage(g, x, y, kind) {
+    if (kind === 'fig') {
+      R(g, x + 7, y - 6, 2, 16, C.mahogany);
+      for (const [dx, dy] of [[-1, -16], [3, -14], [-4, -11], [5, -9], [-2, -6], [2, -4], [-5, -3], [6, -12]]) {
+        R(g, x + 6 + dx, y + dy, 4, 3, C.green); P(g, x + 6 + dx, y + dy, C.lime);
+      }
+    } else if (kind === 'snake') {
+      for (const [dx, h] of [[5, 12], [7, 15], [9, 11], [6, 8], [10, 9]]) {
+        R(g, x + dx, y + 9 - h, 2, h, C.green); P(g, x + dx, y + 9 - h, C.lime); P(g, x + dx + 1, y + 11 - h, C.gold);
+      }
+    } else if (kind === 'monstera') {
+      R(g, x + 7, y - 2, 2, 12, C.forest);
+      for (const [dx, dy, w, h] of [[0, -6, 6, 5], [8, -8, 6, 6], [2, 0, 5, 4], [9, -1, 6, 4], [4, -11, 6, 5]]) {
+        R(g, x + dx, y + dy, w, h, C.green); R(g, x + dx, y + dy, w, 1, C.lime); P(g, x + dx + 2, y + dy + 2, C.forest);
+      }
+    } else if (kind === 'fern') {
+      // arching fronds with little leaflets
+      for (const [dir, len, lift] of [[-1, 7, 0.9], [1, 7, 0.9], [-0.6, 6, 1.5], [0.6, 6, 1.5], [-0.15, 6, 2.1], [0.2, 5, 2.2]]) {
+        for (let k = 1; k <= len; k++) {
+          const fx = Math.round(x + 8 + dir * k);
+          const fy = Math.round(y + 9 - k * lift + k * k * 0.13);
+          P(g, fx, fy, C.forest);
+          P(g, fx, fy - 1, k % 2 ? C.lime : C.green);
+          if (k > 1 && k < len) { P(g, fx - 1, fy - 1, C.green); P(g, fx + 1, fy - 2, C.lime); }
+        }
+      }
+    } else { // bush
+      oval(g, x + 8, y + 4, 7, 6, C.forest);
+      oval(g, x + 7, y + 3, 6, 5, C.green);
+      P(g, x + 5, y + 1, C.lime); P(g, x + 9, y, C.lime); P(g, x + 4, y + 5, C.lime); P(g, x + 11, y + 4, C.lime);
+    }
   }
 
   for (const pod of PODS) makePod(pod);
@@ -1185,14 +1469,28 @@
   makeMeeting();
 
   // ---------------------------------------------------------------- lights (night)
-  function lights() {
+  const LAMPS = [
+    { x: 55, y: 22, r: 12 }, { x: 88, y: 24, r: 18 }, { x: 24, y: 76, r: 14 }, // coffee, under-cabinet, vending
+    { x: 272, y: 20, r: 16 }, { x: 448, y: 26, r: 18 }, { x: 424, y: 26, r: 12 }, // elevator, racks, terminal
+    { x: 25, y: 145, r: 16 }, { x: 88, y: 170, r: 26 }, { x: 440, y: 76, r: 26 }, // arcade, lounge lamp, library lamp
+  ];
+  function lights(date, now) {
     const L = [];
+    for (const a of dyn.alerts) L.push({ x: a.x, y: a.y, r: 14 }); // even in a power cut
+    if (dyn.blackout) return L;
     for (const s of SEATS) if (dyn.seats[s.id]) L.push({ x: s.cx, y: s.side === 'n' ? s.pod.y + 18 : s.pod.y + 30, r: 18 });
-    L.push(
-      { x: 55, y: 22, r: 12 }, { x: 88, y: 24, r: 18 }, { x: 24, y: 76, r: 14 }, // coffee, under-cabinet, vending
-      { x: 272, y: 20, r: 16 }, { x: 448, y: 26, r: 18 }, { x: 424, y: 26, r: 12 }, // elevator, racks, terminal
-      { x: 25, y: 145, r: 16 }, { x: 88, y: 170, r: 26 }, { x: 440, y: 76, r: 26 }, // arcade, lounge lamp, library lamp
-    );
+    const h = date ? date.getHours() + date.getMinutes() / 60 : 0;
+    LAMPS.forEach((l, i) => {
+      if (dyn.lampsOff) return; // empty office
+      if (now - dyn.lampsOnAt < i * 400) return; // the first duck of the day switches them on one after the other
+      // in the evening each lamp has its own time, between 18:00 and 19:30 (grey days: on all day)
+      if (h >= 7.5 && h < 21 && !greyDay() && h < 18 + ((i * 7) % 10) * 0.15) return;
+      L.push(l);
+    });
+    if (dyn.season === 'halloween') L.push({ x: 19 * T + 8, y: 15 * T + 8, r: 12 });
+    if (dyn.season === 'christmas') L.push({ x: 19 * T + 8, y: 15 * T - 2, r: 16 });
+    if (dyn.meeting) L.push({ x: 400, y: 192, r: 22 });
+    if (dyn.cake) L.push({ x: 400, y: 184, r: 14 });
     return L;
   }
 
@@ -1200,6 +1498,8 @@
   let bg = null;
   let bgKey = '';
   function drawBackground(g, date) {
+    dyn.season = season(date);
+    dyn.weather = weatherAt(date);
     const key = date.getHours() + ':' + date.getMinutes();
     if (!bg || key !== bgKey) { bg = renderBackground(date); bgKey = key; }
     g.drawImage(bg, 0, 0);
@@ -1232,7 +1532,8 @@
   }
 
   DO.office = {
-    T, COLS, ROWS, W, MAP_H, PODS, SEATS, LOUNGE, MEETING, STATIONS, ELEVATOR, FURN,
+    T, COLS, ROWS, W, MAP_H, PODS, SEATS, LOUNGE, MEETING, STATIONS, ELEVATOR, FURN, PANES, WINDOWS,
     walkable, dyn, drawBackground, drawWallLayer, sortables, lights, skyPhase, validate,
+    nightAlpha, duskTint, season, weatherAt, forceWeather: (w) => { forcedWeather = w || null; },
   };
 })(globalThis.DO = globalThis.DO || {});
