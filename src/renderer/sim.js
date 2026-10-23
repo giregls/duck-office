@@ -165,6 +165,13 @@
     s5.next = now + 30000;
     s6.next = now + 1000; s7.next = now + 1000;
     if (scenario === 'hatch') { s8.next = now + 600; s8.forceAgent = true; s8.async = false; }
+    if (scenario === 'wait') {
+      // everybody waits for you, standing on their desks: shows both sides of the islands
+      sessions.forEach((s, i) => {
+        setState(s, i % 2 ? 'input' : 'permission', now - 1000, i % 2 ? null : toolFor('exec', now - 1000));
+        s.next = now + 10 * MIN;
+      });
+    }
     if (scenario === 'busy') {
       // everybody at their desk: shows both seating directions
       sessions.forEach((s, i) => {

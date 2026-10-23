@@ -102,7 +102,10 @@
         tile: { c: pod.c + 2 * i, r: north ? pod.r : pod.r + 3 },
         point: { x: cx, y: north ? Y0 + 13 : Y0 + 61 },
         sit: { x: cx - 8, y: north ? Y0 + 4 : Y0 + 40, anchor: north ? Y0 + 20 : Y0 + 56, view: north ? 'front' : 'back' },
-        desk: { x: cx, y: north ? Y0 + 26 : Y0 + 45, anchor: Y0 + 54.5 },
+        // standing on the desk (waiting for you): the north duck stands behind the monitors
+        // across (drawn between the two layers of the bench), the south duck on the front
+        // edge of its desk, so its own monitor stays visible above its head
+        desk: north ? { x: cx, y: Y0 + 23, anchor: Y0 + 30 } : { x: cx, y: Y0 + 48, anchor: Y0 + 54.5 },
         perches: north
           ? [{ x: cx - 12, y: Y0 + 27 }, { x: cx + 12, y: Y0 + 27 }]
           : [{ x: cx - 13, y: Y0 + 46 }, { x: cx + 12, y: Y0 + 46 }],
@@ -960,38 +963,49 @@
       if (s.side === 'n') parts.push({ y: Y0 + 14, draw: (g) => drawChairNorth(g, s.cx, Y0) });
       else parts.push({ y: Y0 + 61, draw: (g) => drawChairSouth(g, s.cx, Y0 + 48) });
     }
+    // The bench is drawn in two layers, so that a duck standing on the north desk goes
+    // between them: the north desk (with its laptops) behind it, the divider, the south
+    // desk and its monitors in front of it.
+    parts.push({
+      y: Y0 + 21,
+      draw: (g, now) => {
+        g.drawImage(bench(), 0, 0, 64, 13, X0, Y0 + 15, 64, 13);
+        for (const s of seats) {
+          if (s.side !== 'n') continue;
+          const st = dyn.seats[s.id];
+          drawProp(g, DESK_PROPS[DO.hash(s.id) % DESK_PROPS.length], s.cx + 8, Y0 + 19, !!st, now);
+          if (st) {
+            // open laptop: we see the back of its lid and a sliver of its base
+            R(g, s.cx - 6, Y0 + 13, 12, 9, C.outline);
+            R(g, s.cx - 5, Y0 + 14, 10, 7, C.grey);
+            R(g, s.cx - 5, Y0 + 14, 10, 1, C.silver);
+            P(g, s.cx - 6, Y0 + 13, C.wood); P(g, s.cx + 5, Y0 + 13, C.wood); // rounded corners
+            const logo = seatScreenColor(st, now) || C.white;
+            R(g, s.cx - 1, Y0 + 16, 2, 2, logo); P(g, s.cx + 1, Y0 + 16, logo);
+            R(g, s.cx - 6, Y0 + 22, 12, 1, C.steel);
+          } else {
+            R(g, s.cx - 6, Y0 + 19, 12, 3, C.outline); R(g, s.cx - 5, Y0 + 19, 10, 1, C.silver); R(g, s.cx - 5, Y0 + 20, 10, 1, C.grey);
+          }
+        }
+      },
+    });
     parts.push({
       y: Y0 + 54,
       draw: (g, now) => {
-        g.drawImage(bench(), X0, Y0 + 15);
+        g.drawImage(bench(), 0, 13, 64, 30, X0, Y0 + 28, 64, 30);
         for (const s of seats) {
+          if (s.side === 'n') continue;
           const st = dyn.seats[s.id];
           const prop = DESK_PROPS[DO.hash(s.id) % DESK_PROPS.length];
-          if (s.side === 'n') {
-            drawProp(g, prop, s.cx + 8, Y0 + 19, !!st, now);
-            if (st) {
-              // open laptop: we see the back of its lid and a sliver of its base
-              R(g, s.cx - 6, Y0 + 13, 12, 9, C.outline);
-              R(g, s.cx - 5, Y0 + 14, 10, 7, C.grey);
-              R(g, s.cx - 5, Y0 + 14, 10, 1, C.silver);
-              P(g, s.cx - 6, Y0 + 13, C.wood); P(g, s.cx + 5, Y0 + 13, C.wood); // rounded corners
-              const logo = seatScreenColor(st, now) || C.white;
-              R(g, s.cx - 1, Y0 + 16, 2, 2, logo); P(g, s.cx + 1, Y0 + 16, logo);
-              R(g, s.cx - 6, Y0 + 22, 12, 1, C.steel);
-            } else {
-              R(g, s.cx - 6, Y0 + 19, 12, 3, C.outline); R(g, s.cx - 5, Y0 + 19, 10, 1, C.silver); R(g, s.cx - 5, Y0 + 20, 10, 1, C.grey);
-            }
-          } else {
-            drawProp(g, prop === 'mug' ? 'lamp' : prop, s.cx - 15, Y0 + 37, !!st, now);
-            // monitor on its stand, keyboard and mouse
-            R(g, s.cx - 7, Y0 + 24, 14, 10, C.outline);
-            R(g, s.cx - 6, Y0 + 25, 12, 8, st ? seatScreenColor(st, now) : C.navy);
-            if (st && !dyn.blackout) drawScreenContent(g, s.cx - 6, Y0 + 25, st, now);
-            else R(g, s.cx - 5, Y0 + 26, 3, 1, C.slate); // reflection on the dark screen
-            R(g, s.cx - 1, Y0 + 34, 2, 2, C.outline); R(g, s.cx - 3, Y0 + 36, 6, 1, C.outline);
-            R(g, s.cx - 6, Y0 + 39, 12, 3, C.outline); R(g, s.cx - 5, Y0 + 39, 10, 1, C.silver); R(g, s.cx - 5, Y0 + 40, 10, 1, C.grey);
-            R(g, s.cx + 8, Y0 + 39, 2, 3, C.outline); P(g, s.cx + 8, Y0 + 39, C.silver);
-          }
+          drawProp(g, prop === 'mug' ? 'lamp' : prop, s.cx - 15, Y0 + 37, !!st, now);
+          // monitor on its stand, keyboard and mouse
+          R(g, s.cx - 7, Y0 + 24, 14, 10, C.outline);
+          R(g, s.cx - 6, Y0 + 25, 12, 8, st ? seatScreenColor(st, now) : C.navy);
+          if (st && !dyn.blackout) drawScreenContent(g, s.cx - 6, Y0 + 25, st, now);
+          else R(g, s.cx - 5, Y0 + 26, 3, 1, C.slate); // reflection on the dark screen
+          R(g, s.cx - 1, Y0 + 34, 2, 2, C.outline); R(g, s.cx - 3, Y0 + 36, 6, 1, C.outline);
+          R(g, s.cx - 6, Y0 + 39, 12, 3, C.outline); R(g, s.cx - 5, Y0 + 39, 10, 1, C.silver); R(g, s.cx - 5, Y0 + 40, 10, 1, C.grey);
+          R(g, s.cx + 8, Y0 + 39, 2, 3, C.outline); P(g, s.cx + 8, Y0 + 39, C.silver);
         }
         // the project's nameplate on the front of the bench (none for the home folder)
         const label = dyn.podLabels[pod.id];

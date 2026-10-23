@@ -24,4 +24,4 @@ Claude Code sessions as pixel-art ducks in an open space. The user speaks French
 ## Checks
 
 - `npm test` (Node 24, glob form) — tracker + duck behaviour with a fake clock + office map (everything reachable, no furniture painted over walkable floor or over other furniture, walking ducks never cross furniture).
-- Visual check: `node_modules/electron/dist/electron.exe . --capture=out.png --demo --no-tracker --hour=14 --seed=7 [--scale=5 --crop=x,y,w,h --select=0 --scenario=hatch|arrive --weather=rain --date=2026-12-24 --event=pizza --event-at=500 --capture-delay=20000]`, then look at the PNG. One capture at a time (parallel ones share a cache folder and hang).
+- Visual check: `node_modules/electron/dist/electron.exe . --capture=out.png --demo --no-tracker --hour=14 --seed=7 [--scale=5 --crop=x,y,w,h --select=0 --scenario=hatch|arrive|busy|wait --weather=rain --date=2026-12-24 --event=pizza --event-at=500 --capture-delay=20000]`, then look at the PNG. One capture at a time (parallel ones share a cache folder and hang).

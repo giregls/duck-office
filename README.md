@@ -197,7 +197,7 @@ Le mode capture enregistre une image sans ouvrir de fenêtre, pratique pour vér
 node_modules/electron/dist/electron.exe . --capture=shot.png --demo --no-tracker --hour=22 --seed=7
 ```
 
-Options : `--scale=3`, `--crop=x,y,w,h`, `--select=0` (ouvre une fiche), `--bilan`, `--scenario=hatch|arrive|busy`, `--frames=90 --frame-interval=110` (une série d'images, comme pour l'animation ci-dessus), `--capture-delay=4000`, `--weather=clear|cloudy|rain|storm|snow`, `--date=2026-12-24` (décor de saison), `--event=pigeon|sky|blackout|coffee|printer|robot|arcade|cat|pizza|birthday|watering --event-at=500` (force un événement). Lance les captures une par une : en parallèle, elles se disputent le même dossier de cache.
+Options : `--scale=3`, `--crop=x,y,w,h`, `--select=0` (ouvre une fiche), `--bilan`, `--scenario=hatch|arrive|busy|wait` (wait : tout le monde attend, debout sur son bureau), `--frames=90 --frame-interval=110` (une série d'images, comme pour l'animation ci-dessus), `--capture-delay=4000`, `--weather=clear|cloudy|rain|storm|snow`, `--date=2026-12-24` (décor de saison), `--event=pigeon|sky|blackout|coffee|printer|robot|arcade|cat|pizza|birthday|watering --event-at=500` (force un événement). Lance les captures une par une : en parallèle, elles se disputent le même dossier de cache.
 
 Tout le pixel art est **dessiné par le code**, sans aucun fichier image : les sprites sont des grilles de caractères dans `sprites.js`, les meubles des rectangles dans `office.js`. La palette est [ENDESGA 32](https://lospec.com/palette-list/endesga-32), et l'image interne fait 480 × 270 pixels, agrandie d'un facteur entier pour rester nette.
 
