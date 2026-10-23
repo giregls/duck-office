@@ -107,9 +107,9 @@ Le coût est calculé **au tarif de l'API Anthropic**, modèle par modèle, cach
 
 ```mermaid
 flowchart LR
-  S["sessions/&lt;pid&gt;.json<br/>sessions ouvertes et leur état"] --> T
-  J["projects/**/&lt;session&gt;.jsonl<br/>journal de chaque session"] --> T
-  A["&lt;session&gt;/subagents/agent-*.jsonl<br/>un fichier par sous-agent"] --> T
+  S["~/.claude/sessions/PID.json<br/>sessions ouvertes et leur état"] --> T
+  J["~/.claude/projects/…/SESSION.jsonl<br/>journal de chaque session"] --> T
+  A["SESSION/subagents/agent-ID.jsonl<br/>un fichier par sous-agent"] --> T
   T["Tracker<br/>(processus principal, lecture seule)"] -- "instantanés" --> R["Rendu Canvas 2D<br/>480 × 270 pixels"]
   R --> O["Canards, canetons,<br/>bulles, bilan des tokens"]
 ```
