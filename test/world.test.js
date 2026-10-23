@@ -59,7 +59,8 @@ test('a new session arrives through the elevator, then sits down', () => {
   const s = snap(session('b', 'thinking'));
   W.ingest(s, now);
   W.update(now);
-  assert.equal(W.get('s:b').mode, 'enter');
+  assert.equal(W.get('s:b').mode, 'lift');
+  assert.ok(W.get('s:b').inCabin);
   run(20000, s);
   const d = W.get('s:b');
   assert.equal(d.mode, 'sit');
@@ -247,4 +248,37 @@ test('ducklings follow their mother in single file', () => {
   assert.ok(far < followed / 4, `${far} of ${followed} frames far from the mother`);
   assert.equal(W.get('s:q').target.station, 'globe');
   for (const id of ['a:q:d1', 'a:q:d2']) assert.notEqual(W.get(id).mode, 'follow');
+});
+
+test('leaving by the elevator: wait for the door, step in, press the button, the door closes', () => {
+  fresh(session('z', 'thinking'));
+  const phases = [];
+  let opened = 0;
+  const end = now + 30000;
+  while (now < end && W.get('s:z')) {
+    run(33, snap());
+    const d = W.get('s:z');
+    if (d && d.mode === 'lift' && phases[phases.length - 1] !== d.lift.phase) phases.push(d.lift.phase);
+    opened = Math.max(opened, DO.office.dyn.elevator);
+  }
+  assert.equal(W.get('s:z'), undefined);
+  assert.deepEqual(phases, ['call', 'stepin', 'turn', 'press', 'close', 'ride']);
+  assert.ok(opened > 0.95);
+  run(2000, snap());
+  assert.equal(DO.office.dyn.elevator, 0); // closed behind it
+});
+
+test('arriving by the elevator: the door opens on the cabin and the duck steps out', () => {
+  fresh();
+  const s = snap(session('y', 'thinking'));
+  W.ingest(s, now);
+  const phases = [];
+  for (let i = 0; i < 200; i++) {
+    run(33, s);
+    const d = W.get('s:y');
+    if (d.mode === 'lift' && phases[phases.length - 1] !== d.lift.phase) phases.push(d.lift.phase);
+  }
+  assert.deepEqual(phases, ['ding', 'open', 'stepout']);
+  assert.ok(!W.get('s:y').inCabin);
+  assert.notEqual(W.get('s:y').mode, 'lift');
 });

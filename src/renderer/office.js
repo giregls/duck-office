@@ -611,6 +611,7 @@
   const dyn = {
     seats: {}, // seatId -> { state, cat }
     elevator: 0, // door openness 0..1
+    liftButton: -Infinity, liftMoving: false, // last press of the cabin button, cabin moving
     coffee: false, terminal: false, racks: 0, globe: false,
     whiteboard: null, // { done, total }
     whiteboardParty: false, listDone: null, // a todo list was just completed
@@ -753,11 +754,26 @@
     }
   }
 
-  function drawElevator(g, now) {
-    const open = dyn.elevator;
+  // The elevator is drawn in two steps: the cabin here (wall layer), then whoever is riding
+  // (world.js), then the doors on top of them.
+  function drawElevatorCabin(g, now) {
     R(g, 258, 8, 28, 23, C.navy); // cabin
     R(g, 260, 9, 24, 1, C.gold);
     R(g, 258, 29, 28, 2, C.slate);
+    // button panel on the side wall: the button lights up when someone presses it
+    R(g, 282, 14, 3, 8, C.slate); R(g, 282, 14, 3, 1, C.steel);
+    const pressed = now - (dyn.liftButton || -Infinity) < 1200;
+    P(g, 283, 16, pressed ? C.yellow : C.grey); P(g, 283, 19, C.grey);
+    // floor display: lit while the doors are open, an arrow runs while the cabin moves
+    if (dyn.liftMoving) { R(g, 268, 5, 8, 3, C.black); P(g, 268 + (Math.floor(now / 120) % 8), 6, C.gold); }
+    else {
+      P(g, 271, 6, dyn.elevator > 0 || Math.floor(now / 1500) % 3 === 0 ? C.gold : C.wine);
+      P(g, 272, 6, dyn.elevator > 0 ? C.gold : C.wine);
+    }
+  }
+
+  function drawElevatorDoors(g) {
+    const open = dyn.elevator;
     const shift = Math.round(open * 13);
     const w = 14 - shift;
     if (w > 0) {
@@ -767,10 +783,6 @@
         R(g, flip ? dx : dx + w - 1, 8, 1, 23, C.steel);
       }
     }
-    // the floor display lights up while someone takes the elevator
-    const lit = open > 0;
-    P(g, 271, 6, lit || Math.floor(now / 1500) % 3 === 0 ? C.gold : C.wine);
-    P(g, 272, 6, lit ? C.gold : C.wine);
   }
 
   function drawCoffee(g, now) {
@@ -864,7 +876,7 @@
     drawSeasonWall(g, now, phase);
     drawNeon(g, now);
     drawSecondHand(g, date);
-    drawElevator(g, now);
+    drawElevatorCabin(g, now);
     drawCoffee(g, now);
     drawCoolerBubbles(g, now);
     drawTerminalScreen(g, now);
@@ -1547,7 +1559,7 @@
 
   DO.office = {
     T, COLS, ROWS, W, MAP_H, PODS, SEATS, LOUNGE, MEETING, STATIONS, ELEVATOR, FURN, PANES, WINDOWS,
-    walkable, dyn, drawBackground, drawWallLayer, sortables, lights, skyPhase, validate,
+    walkable, dyn, drawBackground, drawWallLayer, drawElevatorDoors, sortables, lights, skyPhase, validate,
     nightAlpha, duskTint, season, weatherAt, forceWeather: (w) => { forcedWeather = w || null; },
   };
 })(globalThis.DO = globalThis.DO || {});

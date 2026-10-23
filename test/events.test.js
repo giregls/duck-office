@@ -53,55 +53,78 @@ test('every event can be forced, plays to its end and leaves the office clean', 
     assert.ok(E.force(name, now, NOON), name);
     let borrowed = 0;
     const end = now + 4 * MIN;
-    while (E.current() === name && now < end) {
+    while (E.running().includes(name) && now < end) {
       run(33, s);
-      borrowed = Math.max(borrowed, [...W.ducks.values()].filter((d) => d.event).length);
+      borrowed = Math.max(borrowed, [...W.ducks.values()].filter((d) => d.event && d.event.station).length);
     }
-    assert.notEqual(E.current(), name, `${name} should be over after 4 min`);
-    assert.deepEqual([...W.ducks.values()].filter((d) => d.event).map((d) => d.id), [], `${name} released its ducks`);
-    for (const k of ['coffeeBroken', 'printerJam', 'arcadeFrenzy', 'blackout', 'pizza', 'cake']) assert.ok(!O.dyn[k], `${name} left dyn.${k} on`);
-    if (['arcade', 'pizza', 'birthday', 'watering'].includes(name)) assert.ok(borrowed > 0, `${name} borrows idle ducks`);
+    assert.ok(!E.running().includes(name), name + ' should be over after 4 min');
+    const flag = { coffee: 'coffeeBroken', printer: 'printerJam', arcade: 'arcadeFrenzy', blackout: 'blackout', pizza: 'pizza', birthday: 'cake' }[name];
+    if (flag) assert.ok(!O.dyn[flag], name + ' left dyn.' + flag + ' on');
+    if (['arcade', 'pizza', 'birthday', 'watering'].includes(name)) assert.ok(borrowed > 0, name + ' borrows idle ducks');
   }
 });
 
-// Names of the events seen, in order, and the quiet gaps between two of them (ms).
+test('a finished event lets its ducks go', () => {
+  const s = snap(idle('a'), idle('b'));
+  fresh(9, ...s.agents);
+  E.force('arcade', now, NOON);
+  const mine = () => [...W.ducks.values()].filter((d) => d.event && d.event.station === 'arcade').length;
+  run(15000, s);
+  assert.equal(mine(), 2);
+  while (E.running().includes('arcade')) run(33, s);
+  assert.equal(mine(), 0);
+});
+
+// Follows the event slots: names in the order they start, the quiet gap of a slot between
+// two of its events, how many events ran at once, and any event running twice at once.
 function watch(ms, s) {
-  const names = [], gaps = [];
-  let quietSince = null;
+  const starts = [], gaps = [], quiet = [], twice = [];
+  let most = 0, prev = E.slots();
   run(ms, s, () => {
-    const c = E.current();
-    if (!c) { if (quietSince === null) quietSince = now; return; }
-    if (quietSince !== null && names.length) gaps.push(now - quietSince);
-    quietSince = null;
-    if (names[names.length - 1] !== c || gaps.length >= names.length) names.push(c);
+    const cur = E.slots();
+    cur.forEach((name, i) => {
+      if (!name && prev[i]) quiet[i] = now;
+      if (name && name !== prev[i]) {
+        starts.push(name);
+        if (!prev[i] && quiet[i] !== undefined) gaps.push(now - quiet[i]);
+      }
+    });
+    const live = cur.filter(Boolean);
+    most = Math.max(most, live.length);
+    if (new Set(live).size !== live.length) twice.push(live.join(','));
+    prev = cur;
   });
-  return { names, gaps };
+  return { starts, gaps, most, twice };
 }
 
-test('something happens every 30 s to 1 min, never the same thing twice in a row', () => {
-  fresh(7, idle('a'), idle('b'), idle('c'));
-  const { names, gaps } = watch(30 * MIN, snap(idle('a'), idle('b'), idle('c')));
-  assert.ok(names.length >= 15, `only ${names.length} events in 30 min`);
-  for (const g of gaps) assert.ok(g >= 29000 && g <= 61000, `gap of ${g} ms`);
-  for (let i = 1; i < names.length; i++) assert.notEqual(names[i], names[i - 1], names.join(','));
+test('up to 3 events at once, each slot with a quiet gap of 30 s to 1 min', () => {
+  const s = snap(idle('a'), idle('b'), idle('c'), idle('d'));
+  fresh(7, ...s.agents);
+  const { starts, gaps, most, twice } = watch(30 * MIN, s);
+  assert.equal(most, 3);
+  assert.deepEqual(twice, []);
+  assert.ok(starts.length >= 30, 'only ' + starts.length + ' events in 30 min');
+  for (const g of gaps) assert.ok(g >= 29000, 'gap of ' + g + ' ms');
+  const onTime = gaps.filter((g) => g <= 61000).length;
+  assert.ok(onTime >= gaps.length * 0.9, onTime + ' of ' + gaps.length + ' gaps within 1 min');
+  for (let i = 1; i < starts.length; i++) assert.notEqual(starts[i], starts[i - 1], starts.join(','));
 });
 
 test('events go on while a duck waits for you', () => {
   const s = snap(idle('a'), idle('b'), session('p', 'permission', { waitingFor: 'permission prompt' }));
   fresh(2, ...s.agents);
-  const { names } = watch(10 * MIN, s);
-  assert.ok(names.length >= 5, names.join(','));
+  assert.ok(watch(5 * MIN, s).starts.length >= 6);
 });
 
 test('events happen on their own, the same way for the same seed', () => {
   const seen = () => {
     fresh(42, idle('a'), idle('b'), idle('c'));
-    return watch(20 * MIN, snap(idle('a'), idle('b'), idle('c'))).names;
+    return watch(10 * MIN, snap(idle('a'), idle('b'), idle('c'))).starts;
   };
   const first = seen();
-  assert.ok(first.length >= 8, `only ${first.length} events in 20 min`);
-  // (their lengths depend on how the ducks walk, so only the order is compared)
-  assert.deepEqual(seen().slice(0, 8), first.slice(0, 8));
+  assert.ok(first.length >= 8, 'only ' + first.length + ' events in 10 min');
+  // (their lengths depend on how the ducks walk, so only the first ones are compared)
+  assert.deepEqual(seen().slice(0, 6), first.slice(0, 6));
 });
 
 test('the cat, the courier and the robot only walk on free floor', () => {

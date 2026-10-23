@@ -59,12 +59,33 @@
 
   // ------------------------------------------------------------ state
   const DOCK = { c: 15, r: 15, x: 15 * T + 8, y: 15 * T + 12 };
-  const st = { rng: Math.random, current: null, nextAt: 0, last: {}, lastNow: 0, robot: null, day: '' };
+  // Up to SLOTS events play at once, each slot with its own rhythm (30 s to 1 min of quiet
+  // after its last event); the same event never runs twice at once nor twice in a row.
+  const SLOTS = 3;
+  const st = { rng: Math.random, slots: [], last: {}, lastName: null, lastNow: 0, robot: null, day: '' };
   const between = (a, b) => a + st.rng() * (b - a);
   const dayKey = (date) => date.getFullYear() + '-' + (date.getMonth() + 1) + '-' + date.getDate();
+  const running = () => st.slots.filter((s) => s.ev).map((s) => s.ev);
 
   function npc(type, x, y, speed) {
-    return { kind: 'npc', type, x, y, tile: nav().tileOf(x, y), path: [], speed: speed || 30, facing: 'down', mode: 'idle', alpha: 1 };
+    return { kind: 'npc', type, x, y, tile: nav().tileOf(x, y), path: [], speed: speed || 30, facing: 'down', mode: 'idle', hashv: Math.floor(st.rng() * 2) };
+  }
+  // Extras arrive and leave by the elevator, like the ducks.
+  function arriveByLift(e, now) {
+    nav().liftStart(e, 'out', now);
+  }
+  // true on the frame the ride is over
+  function rideLift(e, c) {
+    if (e.mode !== 'lift') return false;
+    const leaving = e.lift.dir === 'in';
+    if (!nav().liftStep(e, c.now, c.dt)) return false;
+    if (leaving) { e.mode = 'gone'; e.lift = null; }
+    return true;
+  }
+  // walk to the elevator door (then liftStart(e, 'in'))
+  function goToLift(e) {
+    const s = O.STATIONS.elevator[e.hashv % 2];
+    walk(e, s.c, s.r);
   }
   function walk(e, c, r) {
     nav().walkTo(e, { c, r }, nav().tileCenter({ c, r }), e.speed);
@@ -115,7 +136,7 @@
 
   // A pigeon lands outside a window, pecks, looks around and flies off.
   def({
-    name: 'pigeon', weight: 3, cooldown: 1.5 * MIN, mini: true, maxMs: 30000,
+    name: 'pigeon', weight: 3, cooldown: 0.75 * MIN, mini: true, maxMs: 30000,
     when: (c) => c.phase !== 'night' && O.dyn.weather !== 'storm',
     start(ev) {
       ev.pane = O.PANES[Math.floor(st.rng() * O.PANES.length)];
@@ -142,7 +163,7 @@
   // Something crosses the sky behind every window: a plane with a banner, a hot-air balloon,
   // or a shooting star at night.
   def({
-    name: 'sky', weight: 2, cooldown: 2 * MIN, mini: true, maxMs: 40000,
+    name: 'sky', weight: 2, cooldown: MIN, mini: true, maxMs: 40000,
     when: () => O.dyn.weather === 'clear' || O.dyn.weather === 'cloudy',
     start(ev, c) {
       ev.kind = c.phase === 'night' ? 'star' : st.rng() < 0.6 ? 'plane' : 'balloon';
@@ -239,7 +260,7 @@
 
   // The robot vacuum leaves its dock, cleans a few spots of the open space and goes back.
   def({
-    name: 'robot', weight: 2, cooldown: 4 * MIN, maxMs: 3 * MIN,
+    name: 'robot', weight: 2, cooldown: 2 * MIN, maxMs: 3 * MIN,
     when: (c) => c.ducks <= 5 || c.hour >= 18 || c.hour < 8,
     start(ev) {
       const r = st.robot;
@@ -273,7 +294,7 @@
 
   // Two ducks on a break play a game at the arcade cabinet; the winner gets confetti.
   def({
-    name: 'arcade', weight: 3, cooldown: 4 * MIN, maxMs: 90000,
+    name: 'arcade', weight: 3, cooldown: 2 * MIN, maxMs: 90000,
     when: (c) => c.idle.length >= 2,
     start(ev, c) {
       for (const d of shuffled(c.idle).slice(0, 2)) borrow(ev, d, 'arcade');
@@ -297,37 +318,31 @@
   // The office cat comes out of the elevator, naps on the lounge rug, then leaves.
   const RUG = { c: 4, r: 12 };
   def({
-    name: 'cat', weight: 2, cooldown: 5 * MIN, maxMs: 150000,
+    name: 'cat', weight: 2, cooldown: 3 * MIN, maxMs: 150000,
     when: () => true,
     start(ev, c) {
       ev.cat = npc('cat', O.ELEVATOR.x, O.ELEVATOR.y, 28);
-      ev.cat.alpha = 0;
+      arriveByLift(ev.cat, c.now);
       ev.phase = 'enter';
       ev.pt = c.now;
-      ev.door = true;
       ev.nap = between(18000, 26000);
     },
     update(ev, c) {
       const cat = ev.cat, t = c.now - ev.pt;
       const next = (phase) => { ev.phase = phase; ev.pt = c.now; };
       if (ev.phase === 'enter') {
-        cat.alpha = Math.min(1, t / 600);
-        if (t > 700) { ev.door = false; walk(cat, RUG.c, RUG.r); next('go'); }
+        if (rideLift(cat, c)) { walk(cat, RUG.c, RUG.r); next('go'); }
       } else if (ev.phase === 'go') {
         if (stepNpc(cat, c.dt)) next('nap');
       } else if (ev.phase === 'nap') {
         if (Math.random() < c.dt * 0.6) DO.world.burst(cat.x + 3, cat.y - 9, 'zz');
-        if (t > ev.nap) { walk(cat, O.ELEVATOR.c, O.ELEVATOR.r); next('leave'); }
+        if (t > ev.nap) { goToLift(cat); next('leave'); }
       } else if (ev.phase === 'leave') {
-        if (cat.path.length <= 3) ev.door = true;
-        if (stepNpc(cat, c.dt)) next('exit');
-      } else {
-        cat.alpha = Math.max(0, 1 - t / 600);
-        if (t > 650) return true;
-      }
+        if (stepNpc(cat, c.dt)) { nav().liftStart(cat, 'in', c.now); next('exit'); }
+      } else if (rideLift(cat, c)) return true;
       return false;
     },
-    sortables: (ev, now) => [{ y: ev.cat.y, draw: (g) => drawCat(g, ev.cat, ev.phase === 'nap', now) }],
+    sortables: (ev, now) => [{ y: ev.cat.y, who: ev.cat, draw: (g) => drawCat(g, ev.cat, ev.phase === 'nap', now) }],
   });
 
   // Lunch (or dinner): a courier brings a pizza to the cafe table; ducks on a break help themselves.
@@ -337,17 +352,15 @@
     when: (c) => ((c.hour >= 11.5 && c.hour < 14) || (c.hour >= 19 && c.hour < 21.5)) && c.idle.length >= 1,
     start(ev, c) {
       ev.courier = npc('courier', O.ELEVATOR.x, O.ELEVATOR.y, 40);
-      ev.courier.alpha = 0;
+      arriveByLift(ev.courier, c.now);
       ev.phase = 'enter';
       ev.pt = c.now;
-      ev.door = true;
     },
     update(ev, c) {
       const e = ev.courier, t = c.now - ev.pt;
       const next = (phase) => { ev.phase = phase; ev.pt = c.now; };
       if (ev.phase === 'enter') {
-        e.alpha = Math.min(1, t / 600);
-        if (t > 700) { ev.door = false; walk(e, DROP.c, DROP.r); next('go'); }
+        if (rideLift(e, c)) { walk(e, DROP.c, DROP.r); next('go'); }
       } else if (ev.phase === 'go') {
         if (stepNpc(e, c.dt)) { e.facing = 'up'; next('drop'); }
       } else if (ev.phase === 'drop') {
@@ -355,15 +368,13 @@
           O.dyn.pizza = true;
           ev.servedAt = c.now;
           for (const d of shuffled(c.idle).slice(0, 2)) borrow(ev, d, 'cafe', { icon: 'heart' });
-          walk(e, O.ELEVATOR.c, O.ELEVATOR.r);
+          goToLift(e);
           next('leave');
         }
       } else if (ev.phase === 'leave') {
-        if (e.path.length <= 3) ev.door = true;
-        if (stepNpc(e, c.dt)) next('exit');
+        if (stepNpc(e, c.dt)) { nav().liftStart(e, 'in', c.now); next('exit'); }
       } else if (ev.phase === 'exit') {
-        e.alpha = Math.max(0, 1 - t / 600);
-        if (t > 650) { ev.door = false; next('gone'); }
+        if (rideLift(e, c)) next('gone');
       }
       if (ev.servedAt) {
         const eating = ev.ducks.filter((d) => arrived(d, 'cafe')).length;
@@ -373,7 +384,7 @@
       return false;
     },
     stop() { O.dyn.pizza = false; },
-    sortables: (ev, now) => (ev.phase === 'gone' ? [] : [{ y: ev.courier.y, draw: (g) => drawCourier(g, ev.courier, !ev.servedAt, now) }]),
+    sortables: (ev, now) => (ev.phase === 'gone' ? [] : [{ y: ev.courier.y, who: ev.courier, draw: (g) => drawCourier(g, ev.courier, !ev.servedAt, now) }]),
   });
 
   // Somebody's birthday: a cake on the meeting table, the ducks on a break gather around it.
@@ -400,7 +411,7 @@
 
   // A duck on a break waters a plant, which blooms for the rest of the day.
   def({
-    name: 'watering', weight: 2, cooldown: 5 * MIN, maxMs: 70000,
+    name: 'watering', weight: 2, cooldown: 2 * MIN, maxMs: 70000,
     when: (c) => c.idle.length >= 1 && c.hour >= 8 && c.hour < 19,
     start(ev, c) {
       const d = shuffled(c.idle)[0];
@@ -433,31 +444,34 @@
     };
   }
 
-  function start(d, ctx) {
+  function start(d, slot, ctx) {
     const ev = { def: d, name: d.name, t0: ctx.now, ducks: [] };
-    st.current = ev;
+    slot.ev = ev;
+    st.lastName = d.name; // the next event to start will be a different one
     d.start(ev, ctx);
     return ev;
   }
 
-  function finish(ev, ctx) {
+  function finish(slot, ctx) {
+    const ev = slot.ev;
     releaseAll(ev);
     if (ev.def.stop) ev.def.stop(ev, ctx);
     st.last[ev.name] = ctx.now;
-    st.lastName = ev.name;
-    st.current = null;
-    st.nextAt = ctx.now + between(30000, 60000);
+    slot.ev = null;
+    slot.nextAt = ctx.now + between(30000, 60000);
   }
 
-  function startRandom(ctx) {
-    const ok = CATALOG.filter((d) => d.name !== st.lastName && (!ctx.mini || d.mini) && ctx.now - (st.last[d.name] ?? -Infinity) >= d.cooldown && d.when(ctx));
-    if (!ok.length) { st.nextAt = ctx.now + 15000; return; }
+  function startRandom(slot, ctx) {
+    const busy = new Set(running().map((ev) => ev.name));
+    const ok = CATALOG.filter((d) => !busy.has(d.name) && d.name !== st.lastName && (!ctx.mini || d.mini)
+      && ctx.now - (st.last[d.name] ?? -Infinity) >= d.cooldown && d.when(ctx));
+    if (!ok.length) { slot.nextAt = ctx.now + 5000; return; } // nothing available yet: try again soon
     let r = st.rng() * ok.reduce((n, d) => n + d.weight, 0);
     for (const d of ok) {
       r -= d.weight;
-      if (r <= 0) return start(d, ctx);
+      if (r <= 0) return start(d, slot, ctx);
     }
-    start(ok[ok.length - 1], ctx);
+    start(ok[ok.length - 1], slot, ctx);
   }
 
   function update(now, opts) {
@@ -469,31 +483,40 @@
       st.day = today;
       for (const k of Object.keys(O.dyn.flowers)) if (O.dyn.flowers[k] !== today) delete O.dyn.flowers[k];
     }
-    const ev = st.current;
-    if (ev) {
-      prune(ev);
-      if (ev.def.update(ev, ctx) || now - ev.t0 > ev.def.maxMs) finish(ev, ctx);
-    } else if (now >= st.nextAt) startRandom(ctx);
+    for (const slot of st.slots) {
+      const ev = slot.ev;
+      if (ev) {
+        prune(ev);
+        if (ev.def.update(ev, ctx) || now - ev.t0 > ev.def.maxMs) finish(slot, ctx);
+      } else if (now >= slot.nextAt) {
+        startRandom(slot, ctx);
+        if (slot.ev) ctx.idle = DO.world.idleDucks(now); // the next slot sees who is still free
+      }
+    }
   }
 
-  // Starts an event right now (screenshots: --event=name), whatever its conditions.
+  // Starts an event right now (screenshots: --event=name), whatever its conditions: in a free
+  // slot, or instead of the first slot's event.
   function force(name, now, date) {
     const d = CATALOG.find((x) => x.name === name);
     if (!d) return false;
     const ctx = context(now, { date }, 0.016);
-    if (st.current) finish(st.current, ctx);
-    start(d, ctx);
+    for (const slot of st.slots) if (slot.ev && slot.ev.name === name) finish(slot, ctx);
+    const slot = st.slots.find((s) => !s.ev) || st.slots[0];
+    if (slot.ev) finish(slot, ctx);
+    start(d, slot, ctx);
     return true;
   }
 
   function reset(seed, now) {
-    if (st.current) releaseAll(st.current);
+    for (const ev of running()) releaseAll(ev);
     st.rng = DO.rng(seed >>> 0);
-    st.current = null;
     st.last = {};
     st.lastName = null;
     st.lastNow = 0;
-    st.nextAt = now + between(10000, 30000);
+    // the slots start one after the other
+    st.slots = [];
+    for (let i = 0; i < SLOTS; i++) st.slots.push({ ev: null, nextAt: now + between(10000, 30000) + i * 20000 });
     st.robot = parkedRobot();
     Object.assign(O.dyn, { coffeeBroken: false, printerJam: false, arcadeFrenzy: false, blackout: false, pizza: false, cake: false });
   }
@@ -513,25 +536,26 @@
 
   function drawCat(g, cat, napping, now) {
     const x = Math.round(cat.x) - 5, y = Math.round(cat.y);
-    g.globalAlpha = cat.alpha;
     DO.world.footShadow(g, cat.x, cat.y + 1, 5);
     if (napping) g.drawImage(img('cat_sleep', false), x, y - 5);
     else {
-      const frame = cat.mode === 'walk' && Math.floor(now / 140) % 2 ? 'cat_b' : 'cat_a';
+      const moving = cat.mode === 'walk' || nav().walkingInLift(cat);
+      const frame = moving && Math.floor(now / 140) % 2 ? 'cat_b' : 'cat_a';
       if (cat.facing === 'left' || cat.facing === 'right') cat.side = cat.facing;
-      g.drawImage(img(frame, cat.side === 'left'), x, y - 7);
+      const hop = cat.mode === 'lift' && cat.lift.phase === 'press' ? -2 : 0; // a jump at the button
+      g.drawImage(img(frame, cat.side === 'left'), x, y - 7 + hop);
     }
-    g.globalAlpha = 1;
   }
 
   function drawCourier(g, e, carrying, now) {
     const tick = (fps) => Math.floor(now / (1000 / fps));
     let frame, mirror = false;
-    if (e.mode === 'walk' && (e.facing === 'left' || e.facing === 'right')) { frame = ['side_1', 'side_2', 'side_3', 'side_4'][tick(8) % 4]; mirror = e.facing === 'left'; }
-    else if (e.mode === 'walk') frame = (e.facing === 'up' ? 'back_walk_' : 'front_walk_') + (tick(6) % 2 ? 'a' : 'b');
+    const moving = e.mode === 'walk' || nav().walkingInLift(e);
+    if (moving && (e.facing === 'left' || e.facing === 'right')) { frame = ['side_1', 'side_2', 'side_3', 'side_4'][tick(8) % 4]; mirror = e.facing === 'left'; }
+    else if (moving) frame = (e.facing === 'up' ? 'back_walk_' : 'front_walk_') + (tick(6) % 2 ? 'a' : 'b');
+    else if (e.mode === 'lift' && e.lift.phase === 'press') frame = 'raise';
     else frame = e.facing === 'up' ? 'back' : 'front_a';
     const x = Math.round(e.x) - 8, y = Math.round(e.y) - 15;
-    g.globalAlpha = e.alpha;
     DO.world.footShadow(g, e.x, e.y, 5);
     g.drawImage(S.duck(frame, 3, mirror), x, y);
     const at = S.HAT_AT[frame] || [0, 0];
@@ -540,7 +564,6 @@
       R(g, x + 2, y + 10, 12, 4, C.outline); R(g, x + 3, y + 10, 10, 3, C.sand); R(g, x + 3, y + 10, 10, 1, C.cream);
       P(g, x + 7, y + 11, C.red);
     }
-    g.globalAlpha = 1;
   }
 
   // Watering can held towards the plant, with a few drops.
@@ -556,30 +579,30 @@
     }
   }
 
-  function sortables(now) {
+  // Everything the running events draw on the floor (items carry `who`: an extra).
+  function items(now) {
     const out = [];
     const r = st.robot;
-    if (r) out.push({ y: r.y, draw: (g) => drawRobot(g, r, now) });
-    const ev = st.current;
-    if (ev && ev.def.sortables) for (const it of ev.def.sortables(ev, now)) out.push(it);
+    if (r) out.push({ y: r.y, who: r, draw: (g) => drawRobot(g, r, now) });
+    for (const ev of running()) if (ev.def.sortables) for (const it of ev.def.sortables(ev, now)) out.push(it);
     return out;
   }
+  const inCabin = (it) => it.who && it.who.inCabin;
+  const hidden = (it) => it.who && it.who.hidden;
 
   function drawWall(g, now) {
-    const ev = st.current;
-    if (ev && ev.def.drawWall) ev.def.drawWall(g, ev, now);
+    for (const ev of running()) if (ev.def.drawWall) ev.def.drawWall(g, ev, now);
   }
 
   DO.events = {
-    update, force, reset, sortables, drawWall,
-    busy: () => !!(st.current && !st.current.def.calm),
-    wantsDoor: () => !!(st.current && st.current.door),
-    current: () => (st.current ? st.current.name : null),
+    update, force, reset, drawWall,
+    sortables: (now) => items(now).filter((it) => !inCabin(it) && !hidden(it)),
+    cabinDrawables: (now) => items(now).filter((it) => inCabin(it) && !hidden(it)), // drawn behind the elevator doors
+    busy: () => running().some((ev) => !ev.def.calm),
+    running: () => running().map((ev) => ev.name),
+    slots: () => st.slots.map((s) => (s.ev ? s.ev.name : null)),
     names: () => CATALOG.map((d) => d.name),
     robot: () => st.robot,
-    npcs: () => {
-      const ev = st.current;
-      return [st.robot, ev && ev.cat, ev && ev.courier].filter(Boolean);
-    },
+    npcs: () => [st.robot, ...running().flatMap((ev) => [ev.cat, ev.courier])].filter(Boolean),
   };
 })(globalThis.DO = globalThis.DO || {});

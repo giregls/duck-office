@@ -19,7 +19,8 @@ Claude Code sessions as pixel-art ducks in an open space. The user speaks French
 - All art is code: grids in `sprites.js`, furniture in `office.js`, palette ENDESGA 32 only (`DO.C`). Internal resolution 480x270, integer scaling.
 - `world.js` uses the frame clock `now` (never `performance.now()`), so tests can drive it.
 - Furniture goes through `furniture()` in `office.js`: it blocks its tiles and its parts are y-sorted with the ducks. Seats are blocked tiles too (only their own duck steps on them). Sprites are lazy (`sprite()`), so `office.js` loads under Node. Animated or seasonal furniture reads `O.dyn` (season, weather, pizza, cake...): the office test draws every season with every extra on.
-- `events.js`: one event at a time, the next one 30 s to 1 min after the previous one ends, never the same twice in a row (cooldowns per event); decisions use its seeded `st.rng` (cosmetic particles may use `Math.random`). Extras (cat, robot, courier) walk with `DO.world.nav`; idle ducks are borrowed through `duck.event`, read first by `want()`, and must always be released (`finish`/`prune`).
+- `events.js`: up to 3 events at once (`SLOTS`), each slot quiet for 30 s to 1 min after its event, never the same event twice at once or twice in a row (cooldowns per event); decisions use its seeded `st.rng` (cosmetic particles may use `Math.random`). Extras (cat, robot, courier) walk with `DO.world.nav`; idle ducks are borrowed through `duck.event`, read first by `want()`, and must always be released (`finish`/`prune`).
+- The elevator (`liftStart`/`liftStep` in `world.js`, shared with the extras): riders wait for the door, step into the cabin, press the button, the door closes; arrivals step out. While `inCabin` they are drawn between the cabin (wall layer) and `drawElevatorDoors`; the door opens while any rider calls it (`liftCalls`).
 
 ## Checks
 

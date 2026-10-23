@@ -40,7 +40,7 @@ Quand plusieurs sessions Claude Code et leurs sous-agents tournent en même temp
 | **A fini, attend ta réponse** | **Monte sur son bureau avec un « ? »** |
 | Inactif depuis 5 min | Va au coin détente, prend un café, joue à la borne d'arcade |
 | Inactif depuis 20 min | Fait la sieste sur le canapé (zZ) |
-| Session fermée | Fait coucou et repart par l'ascenseur |
+| Session fermée | Repart par l'ascenseur : entre dans la cabine, appuie sur le bouton, la porte se referme |
 
 - **La couleur du canard** indique le projet : les sessions d'un même projet partagent un îlot de bureaux.
 - **Le chapeau** distingue les sessions d'un même projet.
@@ -65,7 +65,7 @@ La nuit, un halo éclaire les canards qui t'attendent, pour que le « ! » et le
 
 ### La vie du bureau
 
-Toutes les 30 secondes à 1 minute, il se passe quelque chose : un seul événement à la fois, jamais deux fois le même d'affilée.
+Il se passe toujours quelque chose : jusqu'à trois événements en même temps, chacun suivi d'une pause de 30 secondes à 1 minute. Le même événement ne se joue jamais deux fois à la fois, ni deux fois d'affilée. Le chat et le livreur prennent l'ascenseur, comme les canards.
 
 - un pigeon se pose sur le rebord d'une fenêtre ; un avion avec une banderole ou une montgolfière passe ; une étoile filante la nuit ;
 - une coupure de courant la nuit (« BZZT ») ;
