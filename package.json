@@ -1,0 +1,27 @@
+{
+  "name": "duck-office",
+  "productName": "Duck Office",
+  "version": "0.2.0",
+  "description": "Tes agents Claude Code, en canards, dans un open space en pixel art (app Windows).",
+  "keywords": ["claude-code", "electron", "pixel-art", "agents", "windows"],
+  "license": "MIT",
+  "author": "giregls",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/giregls/duck-office.git"
+  },
+  "main": "src/main/main.js",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "electron .",
+    "demo": "electron . --demo",
+    "test": "node --test \"test/**/*.test.js\"",
+    "debug:tracker": "node src/main/tracker/debug.js"
+  },
+  "devDependencies": {
+    "electron": "44.7.0"
+  }
+}

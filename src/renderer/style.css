@@ -1,0 +1,63 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #181425;
+  user-select: none;
+}
+
+#screen {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  image-rendering: pixelated;
+}
+
+/* Mini mode: frameless window, a small bar appears on hover to move/close it. */
+#bar {
+  display: none;
+}
+
+body.mode-mini #bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 18px;
+  padding: 0 4px;
+  background: rgba(24, 20, 37, 0.85);
+  color: #c0cbdc;
+  font: 11px/18px "Segoe UI", sans-serif;
+  -webkit-app-region: no-drag;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+/* only a drag handle while visible, so it doesn't eat clicks on ducks */
+body.mode-mini:hover #bar {
+  opacity: 1;
+  -webkit-app-region: drag;
+}
+
+#bar .title {
+  flex: 1;
+}
+
+#bar button {
+  -webkit-app-region: no-drag;
+  border: 0;
+  background: transparent;
+  color: #c0cbdc;
+  font-size: 11px;
+  width: 18px;
+  height: 16px;
+  cursor: pointer;
+}
+
+#bar button:hover {
+  background: #3a4466;
+  color: #ffffff;
+}
